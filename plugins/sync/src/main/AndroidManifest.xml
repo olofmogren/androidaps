@@ -19,6 +19,10 @@
             android:name=".nsclientV3.services.NSClientV3Service"
             android:enabled="true"
             android:exported="false" />
+        <service
+            android:name=".gadgetbridge.GadgetBridgeService"
+            android:enabled="true"
+            android:exported="false" />
 
         <activity
             android:name=".openhumans.ui.OHLoginActivity"
@@ -49,6 +53,14 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name="app.aaps.plugins.sync.gadgetbridge.GadgetBridgeReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="app.aaps.gadgetbridge.COMMAND" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

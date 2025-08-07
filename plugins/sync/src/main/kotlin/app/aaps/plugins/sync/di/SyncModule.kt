@@ -36,6 +36,9 @@ import app.aaps.plugins.sync.xdrip.DataSyncSelectorXdripImpl
 import app.aaps.plugins.sync.xdrip.XdripFragment
 import app.aaps.plugins.sync.xdrip.XdripPlugin
 import app.aaps.plugins.sync.xdrip.workers.XdripDataSyncWorker
+import app.aaps.plugins.sync.gadgetbridge.GadgetBridgeReceiver
+import app.aaps.plugins.sync.gadgetbridge.GadgetBridgeService
+import app.aaps.plugins.sync.gadgetbridge.GadgetBridgeFragment
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -44,6 +47,7 @@ import dagger.android.ContributesAndroidInjector
 
 @Module(
     includes = [
+        SyncModule.Injectors::class,
         SyncModule.Binding::class,
         SyncModule.Provide::class
     ]
@@ -51,32 +55,41 @@ import dagger.android.ContributesAndroidInjector
 
 @Suppress("unused")
 abstract class SyncModule {
+    // This nested module contains all the component injectors.
+    @Module
+    abstract class Injectors {
 
-    @ContributesAndroidInjector abstract fun contributesNSClientFragment(): NSClientFragment
+        @ContributesAndroidInjector abstract fun contributesNSClientFragment(): NSClientFragment
 
-    @ContributesAndroidInjector abstract fun contributesNSClientService(): NSClientService
-    @ContributesAndroidInjector abstract fun contributesNSClientV3Service(): NSClientV3Service
-    @ContributesAndroidInjector abstract fun contributesNSClientWorker(): NSClientAddUpdateWorker
-    @ContributesAndroidInjector abstract fun contributesNSClientAddAckWorker(): NSClientAddAckWorker
-    @ContributesAndroidInjector abstract fun contributesNSClientUpdateRemoveAckWorker(): NSClientUpdateRemoveAckWorker
-    @ContributesAndroidInjector abstract fun contributesNSClientMbgWorker(): NSClientMbgWorker
+        @ContributesAndroidInjector abstract fun contributesNSClientService(): NSClientService
+        @ContributesAndroidInjector abstract fun contributesNSClientV3Service(): NSClientV3Service
+        @ContributesAndroidInjector abstract fun contributesNSClientWorker(): NSClientAddUpdateWorker
+        @ContributesAndroidInjector abstract fun contributesNSClientAddAckWorker(): NSClientAddAckWorker
+        @ContributesAndroidInjector abstract fun contributesNSClientUpdateRemoveAckWorker(): NSClientUpdateRemoveAckWorker
+        @ContributesAndroidInjector abstract fun contributesNSClientMbgWorker(): NSClientMbgWorker
 
-    @ContributesAndroidInjector abstract fun contributesLoadStatusWorker(): LoadStatusWorker
-    @ContributesAndroidInjector abstract fun contributesLoadLastModificationWorker(): LoadLastModificationWorker
-    @ContributesAndroidInjector abstract fun contributesLoadBgWorker(): LoadBgWorker
-    @ContributesAndroidInjector abstract fun contributesLoadFoodsWorker(): LoadFoodsWorker
-    @ContributesAndroidInjector abstract fun contributesLoadProfileStoreWorker(): LoadProfileStoreWorker
-    @ContributesAndroidInjector abstract fun contributesTreatmentWorker(): LoadTreatmentsWorker
-    @ContributesAndroidInjector abstract fun contributesLoadDeviceStatusWorker(): LoadDeviceStatusWorker
-    @ContributesAndroidInjector abstract fun contributesDataSyncWorker(): DataSyncWorker
+        @ContributesAndroidInjector abstract fun contributesLoadStatusWorker(): LoadStatusWorker
+        @ContributesAndroidInjector abstract fun contributesLoadLastModificationWorker(): LoadLastModificationWorker
+        @ContributesAndroidInjector abstract fun contributesLoadBgWorker(): LoadBgWorker
+        @ContributesAndroidInjector abstract fun contributesLoadFoodsWorker(): LoadFoodsWorker
+        @ContributesAndroidInjector abstract fun contributesLoadProfileStoreWorker(): LoadProfileStoreWorker
+        @ContributesAndroidInjector abstract fun contributesTreatmentWorker(): LoadTreatmentsWorker
+        @ContributesAndroidInjector abstract fun contributesLoadDeviceStatusWorker(): LoadDeviceStatusWorker
+        @ContributesAndroidInjector abstract fun contributesDataSyncWorker(): DataSyncWorker
 
-    @ContributesAndroidInjector abstract fun contributesTidepoolFragment(): TidepoolFragment
-    @ContributesAndroidInjector abstract fun contributesXdripFragment(): XdripFragment
-    @ContributesAndroidInjector abstract fun contributesXdripDataSyncWorker(): XdripDataSyncWorker
-    @ContributesAndroidInjector abstract fun contributesWearFragment(): WearFragment
-    @ContributesAndroidInjector abstract fun contributesWearDataReceiver(): WearDataReceiver
-    @ContributesAndroidInjector abstract fun contributesWatchUpdaterService(): DataLayerListenerServiceMobile
-    @ContributesAndroidInjector abstract fun contributesCustomWatchfaceInfosActivity(): CwfInfosActivity
+        @ContributesAndroidInjector abstract fun contributesTidepoolFragment(): TidepoolFragment
+        @ContributesAndroidInjector abstract fun contributesXdripFragment(): XdripFragment
+        @ContributesAndroidInjector abstract fun contributesXdripDataSyncWorker(): XdripDataSyncWorker
+        @ContributesAndroidInjector abstract fun contributesWearFragment(): WearFragment
+        @ContributesAndroidInjector abstract fun contributesWearDataReceiver(): WearDataReceiver
+        @ContributesAndroidInjector abstract fun contributesWatchUpdaterService(): DataLayerListenerServiceMobile
+        @ContributesAndroidInjector abstract fun contributesCustomWatchfaceInfosActivity(): CwfInfosActivity
+
+        @ContributesAndroidInjector abstract fun contributesGadgetBridgeService(): GadgetBridgeService
+        @ContributesAndroidInjector abstract fun contributesGadgetBridgeReceiver(): GadgetBridgeReceiver
+        @ContributesAndroidInjector abstract fun contributesGadgetBridgeFragment(): GadgetBridgeFragment
+    }
+
 
     @Module
     open class Provide {

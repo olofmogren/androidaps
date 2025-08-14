@@ -10,8 +10,6 @@ import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.plugin.PluginBaseWithPreferences
 import app.aaps.core.interfaces.plugin.PluginDescription
 import app.aaps.core.interfaces.resources.ResourceHelper
-import app.aaps.core.interfaces.rx.bus.RxBus
-import app.aaps.core.interfaces.rx.events.EventPreferenceChange
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.validators.DefaultEditTextValidator
 import app.aaps.core.validators.preferences.AdaptiveStringPreference
@@ -20,10 +18,8 @@ import app.aaps.plugins.sync.R
 import app.aaps.plugins.sync.gadgetbridge.keys.GadgetBridgeBooleanKey
 import app.aaps.plugins.sync.gadgetbridge.keys.GadgetBridgeStringKey
 import app.aaps.plugins.sync.wear.wearintegration.DataHandlerMobile
-import io.reactivex.rxjava3.disposables.CompositeDisposable
 import javax.inject.Inject
 import javax.inject.Singleton
-import io.reactivex.rxjava3.kotlin.plusAssign
 
 
 @Singleton
@@ -32,7 +28,6 @@ class GadgetBridgePlugin @Inject constructor(
     aapsLogger: AAPSLogger,
     rh: ResourceHelper,
     preferences: Preferences, // Inject the base Preferences interface
-    private val rxBus: RxBus, // RxBus injection
     private val gadgetBridgeServiceHelper: GadgetBridgeServiceHelper,
     private val dataHandlerMobile: DataHandlerMobile
 ) : PluginBaseWithPreferences(
@@ -49,13 +44,11 @@ class GadgetBridgePlugin @Inject constructor(
     aapsLogger, rh, preferences
 ) {
 
-    private val disposable = CompositeDisposable()
-
     override fun onStart() {
         super.onStart()
         aapsLogger.debug(LTag.GADGETBRIDGE, "onStart() called. Plugin is becoming active.")
-        if (isEnabled()) {
-            aapsLogger.debug(LTag.GADGETBRIDGE, "GadgetBridge Plugin enabled. Starting Service.")
+        //if (isEnabled()) {
+            //aapsLogger.debug(LTag.GADGETBRIDGE, "GadgetBridge Plugin enabled. Starting Service.")
             gadgetBridgeServiceHelper.startService(context)
             Thread {
                 try {
@@ -66,27 +59,11 @@ class GadgetBridgePlugin @Inject constructor(
                     // Ignore
                 }
             }.start()
-        }
-        else {
-            aapsLogger.debug(LTag.GADGETBRIDGE, "onStart() called but plguin is not enabled.")
-        }
+        //}
+        //else {
+        //    aapsLogger.debug(LTag.GADGETBRIDGE, "onStart() called but plguin is not enabled.")
+        //}
 
-        // Start or stop the service based on the CURRENT preference state
-        updateServiceState()
-
-        // --- ADD THIS SUBSCRIPTION ---
-        // Listen for future changes to ANY preference
-        disposable += rxBus
-            .toObservable(EventPreferenceChange::class.java)
-            .subscribe({ event ->
-                           // Check if the key that changed is OUR enable key
-                           if (event.isChanged(GadgetBridgeBooleanKey.Enabled.key)) {
-                               aapsLogger.debug(LTag.GADGETBRIDGE, "Enable preference changed. Updating service state.")
-                               updateServiceState()
-                           }
-                       }, { error ->
-                           aapsLogger.error(LTag.GADGETBRIDGE, "Error in preference change subscription", error)
-                       })
     }
 
     override fun onStop() {
@@ -94,23 +71,13 @@ class GadgetBridgePlugin @Inject constructor(
         gadgetBridgeServiceHelper.stopService(context)
         super.onStop()
     }
-    // This is a private helper method to avoid code duplication
-    private fun updateServiceState() {
-        if (isEnabled()) {
-            aapsLogger.debug(LTag.GADGETBRIDGE, "Plugin is enabled. Ensuring service is started.")
-            gadgetBridgeServiceHelper.startService(context)
-        } else {
-            aapsLogger.debug(LTag.GADGETBRIDGE, "Plugin is disabled. Ensuring service is stopped.")
-            gadgetBridgeServiceHelper.stopService(context)
-        }
-    }
 
-    override fun isEnabled(): Boolean {
-        // The enabled state is determined by our custom boolean key
-        val isEnabled = preferences.get(GadgetBridgeBooleanKey.Enabled)
-        aapsLogger.debug(LTag.GADGETBRIDGE, "isEnabled() check: returning $isEnabled")
-        return isEnabled
-    }
+    //override fun isEnabled(): Boolean {
+    //    // The enabled state is determined by our custom boolean key
+    //    val isEnabled = preferences.get(GadgetBridgeBooleanKey.Enabled)
+    //    aapsLogger.debug(LTag.GADGETBRIDGE, "isEnabled() check: returning $isEnabled")
+    //    return isEnabled
+    //}
 
 
     override fun addPreferenceScreen(preferenceManager: PreferenceManager, parent: PreferenceScreen, context: Context, requiredKey: String?) {
@@ -121,7 +88,7 @@ class GadgetBridgePlugin @Inject constructor(
             title = "GadgetBridge Settings"
             initialExpandedChildrenCount = 0
 
-            addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = GadgetBridgeBooleanKey.Enabled, summary = R.string.gadgetbridge_enable_sync_summary, title = R.string.gadgetbridge_enable_sync))
+            //addPreference(AdaptiveSwitchPreference(ctx = context, booleanKey = GadgetBridgeBooleanKey.Enabled, summary = R.string.gadgetbridge_enable_sync_summary, title = R.string.gadgetbridge_enable_sync))
 
             // This preference configures the OUTGOING intent action.
             addPreference(

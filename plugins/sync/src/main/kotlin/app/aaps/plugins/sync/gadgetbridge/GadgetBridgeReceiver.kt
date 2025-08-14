@@ -20,11 +20,11 @@ class GadgetBridgeReceiver : DaggerBroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        // You can now add a check at the very beginning.
-
-        if (intent.action != INCOMING_ACTION) return
 
         aapsLogger.debug(LTag.GADGETBRIDGE, "GadgetBridgeReceiver received command.")
+
+        aapsLogger.debug(LTag.GADGETBRIDGE, "intent action: ${intent.action}")
+        if (intent.action != INCOMING_ACTION) return
 
         val commandType = intent.getStringExtra("commandType")
         val commandJson = intent.getStringExtra("commandJson")

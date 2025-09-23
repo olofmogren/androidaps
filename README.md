@@ -1,4 +1,14 @@
 # AAPS
+
+## AAPS for with support for BangleJS2
+
+This fork of AndroidAPS contains changes in the dev branch for communicating with a BangleJS2 watch. It will require the Gadgetbridge version from the Espruino team [1]. You will also need to set it to allow for Android Intents. Furthermore, you will need the BangleJS AAPS app [2].
+
+1. https://www.espruino.com/Gadgetbridge
+2. https://github.com/olofmogren/aaps-banglejs
+
+
+## General AAPS info
 * Check the wiki: https://wiki.aaps.app
 *  Everyone who’s been looping with AAPS needs to fill out the form after 3 days of looping  https://docs.google.com/forms/d/14KcMjlINPMJHVt28MDRupa4sz4DDIooI4SrW0P3HSN8/viewform?c=0&w=1
 

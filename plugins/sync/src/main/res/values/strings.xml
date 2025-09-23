@@ -120,14 +120,12 @@
     <string name="garmin_local_http_server_port">Local HTTP server port</string>
     <string name="garmin_local_http_server">Local HTTP server</string>
 
-    <!-- GadgetBridgePlugin -->
-    <string name="gadgetbridge">GadgetBridge Sync</string>
-    <string name="gadgetbridge_short">GadgetBridge</string>
-    <string name="gadgetbridge_description">Provides a direct data connection to any watch supported by Gadgetbridge (e.g., Bangle.js, Pebble).</string>
-    <string name="gadgetbridge_enable_sync">Enable GadgetBridge Sync</string>
-    <string name="gadgetbridge_enable_sync_summary">Enable to send data and listen for commands from your watch.</string>
-    <string name="gadgetbridge_setting_intent_action_title">Outgoing Intent Action</string>
-    <string name="gadgetbridge_setting_intent_action_summary">The intent your device\'s GadgetBridge integration listens for. AAPS will send data TO this action. Current: %s</string>
+    <!-- BangleJSPlugin -->
+    <string name="banglejs">BangleJS Sync</string>
+    <string name="banglejs_short">BangleJS</string>
+    <string name="banglejs_description">Provides a direct data connection to BangleJS through GadgetBridge.</string>
+    <string name="banglejs_enable_sync">Enable BangleJS Sync</string>
+    <string name="banglejs_enable_sync_summary">Enable to send data and listen for commands from your BangleJS watch.</string>
 
     <!--    Wear-->
     <string name="wear_shortname">WEAR</string>

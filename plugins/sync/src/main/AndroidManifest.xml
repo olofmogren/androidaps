@@ -20,7 +20,7 @@
             android:enabled="true"
             android:exported="false" />
         <service
-            android:name=".gadgetbridge.GadgetBridgeService"
+            android:name=".banglejs.BangleJSService"
             android:enabled="true"
             android:exported="false" />
 
@@ -50,15 +50,6 @@
             <intent-filter>
                 <!-- Receiver from aapsclient -->
                 <action android:name="app.aaps.aapsclient.weardata" />
-            </intent-filter>
-        </receiver>
-
-        <receiver
-            android:name="app.aaps.plugins.sync.gadgetbridge.GadgetBridgeReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="app.aaps.gadgetbridge.COMMAND" />
             </intent-filter>
         </receiver>
 

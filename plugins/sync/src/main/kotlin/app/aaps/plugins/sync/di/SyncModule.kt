@@ -36,9 +36,8 @@ import app.aaps.plugins.sync.xdrip.DataSyncSelectorXdripImpl
 import app.aaps.plugins.sync.xdrip.XdripFragment
 import app.aaps.plugins.sync.xdrip.XdripPlugin
 import app.aaps.plugins.sync.xdrip.workers.XdripDataSyncWorker
-import app.aaps.plugins.sync.gadgetbridge.GadgetBridgeReceiver
-import app.aaps.plugins.sync.gadgetbridge.GadgetBridgeService
-import app.aaps.plugins.sync.gadgetbridge.GadgetBridgeFragment
+import app.aaps.plugins.sync.banglejs.BangleJSService
+import app.aaps.plugins.sync.banglejs.BangleJSFragment
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -85,9 +84,8 @@ abstract class SyncModule {
         @ContributesAndroidInjector abstract fun contributesWatchUpdaterService(): DataLayerListenerServiceMobile
         @ContributesAndroidInjector abstract fun contributesCustomWatchfaceInfosActivity(): CwfInfosActivity
 
-        @ContributesAndroidInjector abstract fun contributesGadgetBridgeService(): GadgetBridgeService
-        @ContributesAndroidInjector abstract fun contributesGadgetBridgeReceiver(): GadgetBridgeReceiver
-        @ContributesAndroidInjector abstract fun contributesGadgetBridgeFragment(): GadgetBridgeFragment
+        @ContributesAndroidInjector abstract fun contributesBangleJSService(): BangleJSService
+        @ContributesAndroidInjector abstract fun contributesBangleJSFragment(): BangleJSFragment
     }
 
 

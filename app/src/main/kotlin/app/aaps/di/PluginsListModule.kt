@@ -47,7 +47,7 @@ import app.aaps.plugins.source.SyaiTagPlugin
 import app.aaps.plugins.source.TomatoPlugin
 import app.aaps.plugins.source.XdripSourcePlugin
 import app.aaps.plugins.sync.garmin.GarminPlugin
-import app.aaps.plugins.sync.gadgetbridge.GadgetBridgePlugin
+import app.aaps.plugins.sync.banglejs.BangleJSPlugin
 import app.aaps.plugins.sync.nsclient.NSClientPlugin
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
 import app.aaps.plugins.sync.openhumans.OpenHumansUploaderPlugin
@@ -371,7 +371,7 @@ abstract class PluginsListModule {
     @AllConfigs
     @IntoMap
     @IntKey(371)
-    abstract fun bindGadgetBridgePlugin(plugin: GadgetBridgePlugin): PluginBase
+    abstract fun bindBangleJSPlugin(plugin: BangleJSPlugin): PluginBase
 
     @Binds
     @AllConfigs

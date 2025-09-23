@@ -1,13 +1,17 @@
-package app.aaps.plugins.sync.gadgetbridge
+package app.aaps.plugins.sync.banglejs
 
+import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.logging.LTag
+import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.weardata.EventData
 import org.json.JSONArray
 import org.json.JSONObject
-import kotlin.time.Clock
-import kotlin.time.Duration.Companion.hours
+import javax.inject.Inject
+
 //import kotlin.time.ExperimentalTime
 
-object GadgetBridgeDataMapper {
+object BangleJSDataMapper
+{
     private const val MAX_JSON_LENGTH = 3
     private const val JSON_LENGTH_CUTOFF = 6
 
@@ -15,7 +19,11 @@ object GadgetBridgeDataMapper {
         return when (commandType) {
             "ActionBolusPreCheck" -> deserializeBolusPreCheck(commandJson)
             "ActionBolusConfirmed" -> deserializeBolusConfirmed(commandJson)
-            "RequestInitialData" -> EventData.ActionResendData("GadgetBridge")
+            "ActionProfileSwitchPreCheck" -> deserializeProfileSwitchPreCheck(commandJson)
+            "ActionProfileSwitchConfirmed" -> deserializeProfileSwitchConfirmed(commandJson)
+            "ActionTempTargetPreCheck" -> deserializeTempTargetPreCheck(commandJson)
+            "ActionTempTargetConfirmed" -> deserializeTempTargetConfirmed(commandJson)
+            "RequestInitialData" -> EventData.ActionResendData("BangleJS")
             else -> null
         }
     }
@@ -47,6 +55,23 @@ object GadgetBridgeDataMapper {
                 returnCmdJson.put("carbs", it.carbs)
                 payload.put("returnCommandJson", returnCmdJson.toString())
                 payload.put("returnCommandType", "ActionBolusConfirmed")
+            }
+            if (it is EventData.ActionProfileSwitchConfirmed) {
+                val returnCmdJson = JSONObject()
+                returnCmdJson.put("percentage", it.percentage)
+                returnCmdJson.put("timeShift", it.timeShift)
+                returnCmdJson.put("duration", it.duration)
+                payload.put("returnCommandJson", returnCmdJson.toString())
+                payload.put("returnCommandType", "ActionProfileSwitchConfirmed")
+            }
+            if (it is EventData.ActionTempTargetConfirmed) {
+                val returnCmdJson = JSONObject()
+                returnCmdJson.put("duration", it.duration)
+                returnCmdJson.put("isMgdl", it.isMgdl)
+                returnCmdJson.put("low", it.low)
+                returnCmdJson.put("high", it.high)
+                payload.put("returnCommandJson", returnCmdJson.toString())
+                payload.put("returnCommandType", "ActionTempTargetConfirmed")
             }
         }
         return payload
@@ -188,5 +213,23 @@ object GadgetBridgeDataMapper {
     private fun deserializeBolusConfirmed(jsonString: String): EventData.ActionBolusConfirmed {
         val json = JSONObject(jsonString)
         return EventData.ActionBolusConfirmed(json.getDouble("insulin"), json.getInt("carbs"))
+    }
+
+    private fun deserializeProfileSwitchPreCheck(jsonString: String): EventData.ActionProfileSwitchPreCheck {
+        val json = JSONObject(jsonString)
+        return EventData.ActionProfileSwitchPreCheck(json.getInt("timeShift"), json.getInt("percentage"), json.getInt("duration"))
+    }
+    private fun  deserializeProfileSwitchConfirmed(jsonString: String): EventData.ActionProfileSwitchConfirmed {
+        val json = JSONObject(jsonString)
+        return EventData.ActionProfileSwitchConfirmed(json.getInt("timeShift"), json.getInt("percentage"), json.getInt("duration"))
+    }
+    private fun  deserializeTempTargetPreCheck(jsonString: String): EventData.ActionTempTargetPreCheck {
+        val json = JSONObject(jsonString)
+        val command: EventData.ActionTempTargetPreCheck.TempTargetCommand = enumValueOf(json.getString("command"))
+        return EventData.ActionTempTargetPreCheck(command)
+    }
+    private fun  deserializeTempTargetConfirmed(jsonString: String): EventData.ActionTempTargetConfirmed {
+        val json = JSONObject(jsonString)
+        return EventData.ActionTempTargetConfirmed(json.getBoolean("isMgdl"), json.getInt("duration"), json.getDouble("low"), json.getDouble("high"))
     }
 }

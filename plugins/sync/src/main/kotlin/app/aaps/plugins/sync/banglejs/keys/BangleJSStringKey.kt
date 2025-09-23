@@ -1,9 +1,9 @@
-package app.aaps.plugins.sync.gadgetbridge.keys
+package app.aaps.plugins.sync.banglejs.keys
 
 import app.aaps.core.keys.interfaces.BooleanPreferenceKey
 import app.aaps.core.keys.interfaces.StringPreferenceKey
 
-enum class GadgetBridgeStringKey(
+enum class BangleJSStringKey(
     override val key: String,
     override val defaultValue: String,
     override val defaultedBySM: Boolean = false,
@@ -21,7 +21,7 @@ enum class GadgetBridgeStringKey(
     // This key now defines the OUTGOING action.
     // The default is the standard for Bangle.js communication from Gadgetbridge.
 
-    OutgoingIntentAction(key = "gadgetbridge_outgoing_intent_action", defaultValue = "com.banglejs.uart.tx"),
+    //OutgoingIntentAction(key = "gadgetbridge_outgoing_intent_action", defaultValue = "com.banglejs.uart.tx"),
     //OutgoingIntentAction(key = "gadgetbridge_outgoing_intent_action", defaultValue = "nodomain.gadgetbridge.banglejs.JSON"),
 }
 

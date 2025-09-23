@@ -1,8 +1,8 @@
-package app.aaps.plugins.sync.gadgetbridge.keys
+package app.aaps.plugins.sync.banglejs.keys
 
 import app.aaps.core.keys.interfaces.BooleanPreferenceKey
 
-enum class GadgetBridgeBooleanKey(
+enum class BangleJSBooleanKey(
     override val key: String,
     override val defaultValue: Boolean,
     override val calculatedDefaultValue: Boolean = false,
@@ -17,5 +17,5 @@ enum class GadgetBridgeBooleanKey(
     override val exportable: Boolean = true
 ) : BooleanPreferenceKey {
 
-    Enabled("GadgetBridgePluginEnabled", true),
+    Enabled("BangleJSPluginEnabled", true),
 }

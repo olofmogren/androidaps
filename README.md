@@ -2,7 +2,7 @@
 
 ## AAPS for with support for BangleJS2
 
-This fork of AndroidAPS contains changes in the dev branch for communicating with a BangleJS2 watch. It will require the Gadgetbridge version from the Espruino team [1]. You will also need to set it to allow for Android Intents. Furthermore, you will need the BangleJS AAPS app [2].
+This fork of AndroidAPS contains changes in the dev branch for communicating with a BangleJS2 watch. It will require the Gadgetbridge version from the Espruino team [1]. You will also need to set it to allow for Android Intents. Furthermore, you will need the BangleJS AAPS app [2]. The relevant code is in the dev-gb branch.
 
 1. https://www.espruino.com/Gadgetbridge
 2. https://github.com/olofmogren/aaps-banglejs

@@ -98,7 +98,7 @@ class BangleJSService : Service() {
             .observeOn(aapsSchedulers.io)
             .subscribe({
                            aapsLogger.debug(LTag.BANGLEJS, "Loop update triggered. Sending full history.")
-                           sendHistoryToWatch()
+                           sendHistoryToWatch(null)
                        }, { error ->
                            aapsLogger.error(LTag.BANGLEJS, "Error in EventLoopUpdateGui subscription", error)
                        })
@@ -119,8 +119,8 @@ class BangleJSService : Service() {
         when (event) {
             //is EventData.SingleBg -> sendCurrentBgToWatch(event as EventData.SingleBg)
             //is EventData.Status -> sendCurrentStatusToWatch(event)
-            is EventData.GraphData -> triggerHistorySyncIfNeeded() // Pass the event data
-            is EventData.TreatmentData -> triggerHistorySyncIfNeeded() // A new dedicated function
+            is EventData.GraphData -> sendHistoryToWatch("graphdata")
+            is EventData.TreatmentData -> sendHistoryToWatch("treatments")
             is EventData.ConfirmAction -> sendConfirmAction(event)
             else -> {
                 aapsLogger.debug(LTag.BANGLEJS, "Skipping unsupported EventData type: ${event.javaClass.simpleName}")
@@ -279,7 +279,7 @@ class BangleJSService : Service() {
             aapsLogger.debug(LTag.BANGLEJS, "Sufficient time has passed. Starting history sync.")
 
             // Perform the sync.
-            sendHistoryToWatch()
+            sendHistoryToWatch(null)
 
             // IMPORTANT: Update the timestamp after the sync is complete.
             lastHistorySyncTimestamp = now
@@ -291,85 +291,88 @@ class BangleJSService : Service() {
         }
     }
     // This is the master function for sending history.
-    private fun sendHistoryToWatch() {
+    private fun sendHistoryToWatch(t:String?) {
         //val twoHoursAgo = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(2)
         val now = System.currentTimeMillis()
-        val startTime = now - TimeUnit.MINUTES.toMillis(90)
+        val startTime = (now - TimeUnit.MINUTES.toMillis(90) ) % 60000L // look at beginning of minute. Zero seconds, zero millis. Neccessary to not get duplicates of basals when rechecking them.
 
-        // --- Send Glucose History in Chunks ---
-        val glucoseHistory = persistenceLayer.getBgReadingsDataFromTime(startTime, true).blockingGet()
-        val fiveMinHistory = mutableListOf<GV>()
-        val moreThanFourMinutes = 271_000L // 4.5 * 60 * 1000 + 1000L
+        if (t == null || t == "graphdata") {
+            val glucoseHistory = persistenceLayer.getBgReadingsDataFromTime(startTime, true).blockingGet()
+            val fiveMinHistory = mutableListOf<GV>()
+            val moreThanFourMinutes = 271_000L // 4.5 * 60 * 1000 + 1000L
 
-        // Always add the first element.
-        if (glucoseHistory.isNullOrEmpty()) {
-            return
-        }
-        var lastAddedTimestamp = glucoseHistory[0].timestamp
-        fiveMinHistory.add(glucoseHistory[0])
+            // Always add the first element.
+            if (glucoseHistory.isNullOrEmpty()) {
+                return
+            }
+            var lastAddedTimestamp = glucoseHistory[0].timestamp
+            fiveMinHistory.add(glucoseHistory[0])
 
-        // Iterate through the rest of the list.
-        for (i in 1 until glucoseHistory.size) {
-            val currentGlucose = glucoseHistory[i]
+            // Iterate through the rest of the list.
+            for (i in 1 until glucoseHistory.size) {
+                val currentGlucose = glucoseHistory[i]
 
-            if (currentGlucose.timestamp >= lastAddedTimestamp + moreThanFourMinutes) {
-                fiveMinHistory.add(currentGlucose)
-                lastAddedTimestamp = currentGlucose.timestamp
+                if (currentGlucose.timestamp >= lastAddedTimestamp + moreThanFourMinutes) {
+                    fiveMinHistory.add(currentGlucose)
+                    lastAddedTimestamp = currentGlucose.timestamp
+                }
+            }
+
+            //var csvSnippet = mutableListOf<String>()
+            val bgList = JSONArray()
+            //val shortFiveMinHistory = fiveMinHistory.subList(fiveMinHistory.size-15, fiveMinHistory.size)
+            fiveMinHistory.forEach { reading ->
+                //csvSnippet.add("ts:${reading.timestamp},sgv:${reading.value}")
+                bgList.put(JSONObject().apply {
+                    put("ts", reading.timestamp)
+                    put("sgv", reading.value)
+                })
+            }
+            val bgObject = JSONObject().apply {
+                put("data", bgList)
+            }
+
+            //var dataString = csvSnippet.joinToString( "\\n" )
+            //var escapedData = dataString.replace("\"", "\\\"")
+            val bgString = bgObject.toString().replace("\n", "")
+
+            if (bgString.isNotEmpty()) {
+                //sendJsCommandHelper("require(\"Storage\").write(\"${BG_HISTORY_FILENAME}\", \"${escapedData}\"); console.log(\"AAPS Phone wrote ${BG_HISTORY_FILENAME}.\")")
+                sendDataToWatch(bgString, BG_HISTORY_FILENAME)
             }
         }
 
-        //var csvSnippet = mutableListOf<String>()
-        val bgList = JSONArray()
-        //val shortFiveMinHistory = fiveMinHistory.subList(fiveMinHistory.size-15, fiveMinHistory.size)
-        fiveMinHistory.forEach { reading ->
-            //csvSnippet.add("ts:${reading.timestamp},sgv:${reading.value}")
-            bgList.put(JSONObject().apply {
-                put("ts", reading.timestamp)
-                put("sgv", reading.value)
-            })
-        }
-        val bgObject = JSONObject().apply {
-            put("data", bgList)
-        }
 
-        //var dataString = csvSnippet.joinToString( "\\n" )
-        //var escapedData = dataString.replace("\"", "\\\"")
-        val bgString = bgObject.toString().replace("\n", "")
+        if (t == null || t == "treatments") {
+            val insulinTreatments = persistenceLayer.getBolusesFromTimeToTime(startTime, now, true)
 
-        if (bgString.isNotEmpty()) {
-            //sendJsCommandHelper("require(\"Storage\").write(\"${BG_HISTORY_FILENAME}\", \"${escapedData}\"); console.log(\"AAPS Phone wrote ${BG_HISTORY_FILENAME}.\")")
-            sendDataToWatch(bgString, BG_HISTORY_FILENAME)
-        }
-
-        val insulinTreatments = persistenceLayer.getBolusesFromTimeToTime(startTime, now, true)
-
-        /*csvSnippet = mutableListOf<String>()
+            /*csvSnippet = mutableListOf<String>()
         insulinTreatments.forEach { treatment ->
             csvSnippet.add("ts:${treatment.timestamp},insulin:${treatment.amount}")
         }
 
         dataString = csvSnippet.joinToString( "\\n" )*/
-        //escapedData = dataString.replace("\"", "\\\"")
+            //escapedData = dataString.replace("\"", "\\\"")
 
-        val insulinList = JSONArray()
-        insulinTreatments.forEach { treatment ->
-            insulinList.put(JSONObject().apply {
-                put("ts", treatment.timestamp)
-                put("insulin", treatment.amount)
-            })
-        }
-        val insulinObject = JSONObject().apply {
-            put("data", insulinList)
-        }
-        val insulinString = insulinObject.toString().replace("\n", "")
+            val insulinList = JSONArray()
+            insulinTreatments.forEach { treatment ->
+                insulinList.put(JSONObject().apply {
+                    put("ts", treatment.timestamp)
+                    put("insulin", treatment.amount)
+                })
+            }
+            val insulinObject = JSONObject().apply {
+                put("data", insulinList)
+            }
+            val insulinString = insulinObject.toString().replace("\n", "")
 
-        if (insulinString.isNotEmpty()) {
-            //sendJsCommandHelper("require(\"Storage\").write(\"${INSULIN_HISTORY_FILENAME}\", \"${escapedData}\"); console.log(\"AAPS Phone wrote ${INSULIN_HISTORY_FILENAME}.\")")
-            sendDataToWatch(insulinString, INSULIN_HISTORY_FILENAME)
-        }
+            if (insulinString.isNotEmpty()) {
+                //sendJsCommandHelper("require(\"Storage\").write(\"${INSULIN_HISTORY_FILENAME}\", \"${escapedData}\"); console.log(\"AAPS Phone wrote ${INSULIN_HISTORY_FILENAME}.\")")
+                sendDataToWatch(insulinString, INSULIN_HISTORY_FILENAME)
+            }
 
-        val carbsTreatments = persistenceLayer.getCarbsFromTimeToTimeExpanded(startTime, now, true)
-/*
+            val carbsTreatments = persistenceLayer.getCarbsFromTimeToTimeExpanded(startTime, now, true)
+            /*
         carbsTreatments.forEach { treatment ->
             csvSnippet.add("ts:${treatment.timestamp},carbs:${treatment.amount}")
         }
@@ -380,69 +383,74 @@ class BangleJSService : Service() {
 
  */
 
-        val carbsList = JSONArray()
-        carbsTreatments.forEach { treatment ->
-            carbsList.put(JSONObject().apply {
-                put("ts", treatment.timestamp)
-                put("carbs", treatment.amount)
-            })
-        }
-        val carbsObject = JSONObject().apply {
-            put("data", carbsList)
-        }
-        val carbsString = carbsObject.toString().replace("\n", "")
-
-        if (carbsString.isNotEmpty()) {
-            sendDataToWatch(carbsString, CARBS_HISTORY_FILENAME)
-        }
-
-        // BASAL HISTORY:
-        aapsLogger.debug(LTag.BANGLEJS, "Gathering and sending basal history.")
-        val timeStep = TimeUnit.MINUTES.toMillis(1) // Check every minute
-
-        var lastRate: Double? = null
-        //csvSnippet = mutableListOf<String>()
-
-        val basalsList = JSONArray()
-
-        // Iterate from 90 minutes ago to now, one minute at a time
-        for (timestamp in startTime..now step timeStep) {
-            val profile = profileFunction.getProfile(timestamp)
-            if (profile == null) {
-                aapsLogger.warn(LTag.BANGLEJS, "No profile found at timestamp $timestamp, skipping basal point.")
-                continue // Skip this iteration if no profile is active
-            }
-
-            // Check for an active temporary basal at this specific timestamp
-            val activeTempBasal = processedTbrEbData.getTempBasalIncludingConvertedExtended(timestamp)
-
-            val currentRate = // If a temp basal is active, use its absolute rate
-                activeTempBasal?.convertedToAbsolute(timestamp, profile) ?: // Otherwise, use the scheduled basal rate from the profile
-                profile.getBasal(timestamp)
-
-            // Round to 3 decimal places to avoid tiny floating point differences
-            val roundedRate = decimalFormatter.to3Decimal(currentRate).toDouble()
-
-            // If this is the first point, or if the rate has changed, record it.
-            if (lastRate == null || roundedRate != lastRate) {
-                //csvSnippet.add("ts:${timestamp},rate:${roundedRate}")
-                basalsList.put(JSONObject().apply {
-                    put("ts", timestamp)
-                    put("rate", roundedRate)
+            val carbsList = JSONArray()
+            carbsTreatments.forEach { treatment ->
+                carbsList.put(JSONObject().apply {
+                    put("ts", treatment.timestamp)
+                    put("carbs", treatment.amount)
                 })
-                lastRate = roundedRate
             }
-        }
+            val carbsObject = JSONObject().apply {
+                put("data", carbsList)
+            }
+            val carbsString = carbsObject.toString().replace("\n", "")
 
-        //dataString = csvSnippet.joinToString( "\\n" )
+            if (carbsString.isNotEmpty()) {
+                sendDataToWatch(carbsString, CARBS_HISTORY_FILENAME)
+            }
 
-        val basalsObject = JSONObject().apply {
-            put("data", basalsList)
-        }
-        val basalsString = basalsObject.toString().replace("\n", "")
+            // BASAL HISTORY:
+            aapsLogger.debug(LTag.BANGLEJS, "Gathering and sending basal history.")
+            val timeStep = TimeUnit.MINUTES.toMillis(1) // Check every minute
 
-        if (basalsString.isNotEmpty()) {
-            sendDataToWatch(basalsString, BASALS_HISTORY_FILENAME)
+            var lastRate: Double? = null
+            //csvSnippet = mutableListOf<String>()
+
+            val basalsList = JSONArray()
+
+            // Iterate from 90 minutes ago to now, one minute at a time
+            for (timestamp in startTime..now step timeStep) {
+                aapsLogger.debug(LTag.BANGLEJS, "Gathering basal from ts $timestamp.")
+
+                val profile = profileFunction.getProfile(timestamp)
+                if (profile == null) {
+                    aapsLogger.warn(LTag.BANGLEJS, "No profile found at timestamp $timestamp, skipping basal point.")
+                    continue // Skip this iteration if no profile is active
+                }
+
+                // Check for an active temporary basal at this specific timestamp
+                val activeTempBasal = processedTbrEbData.getTempBasalIncludingConvertedExtended(timestamp)
+
+                val currentRate = // If a temp basal is active, use its absolute rate
+                    activeTempBasal?.convertedToAbsolute(timestamp, profile) ?: // Otherwise, use the scheduled basal rate from the profile
+                    profile.getBasal(timestamp)
+
+                // Round to 3 decimal places to avoid tiny floating point differences
+                val roundedRate = decimalFormatter.to3Decimal(currentRate).toDouble()
+
+                // If this is the first point, or if the rate has changed, record it.
+                if (lastRate == null || roundedRate != lastRate) {
+                    //csvSnippet.add("ts:${timestamp},rate:${roundedRate}")
+
+                    aapsLogger.debug(LTag.BANGLEJS, "Basal changed at ts $timestamp. Old basal: $lastRate, new basal: $roundedRate.")
+                    basalsList.put(JSONObject().apply {
+                        put("ts", timestamp)
+                        put("rate", roundedRate)
+                    })
+                    lastRate = roundedRate
+                }
+            }
+
+            //dataString = csvSnippet.joinToString( "\\n" )
+
+            val basalsObject = JSONObject().apply {
+                put("data", basalsList)
+            }
+            val basalsString = basalsObject.toString().replace("\n", "")
+
+            if (basalsString.isNotEmpty()) {
+                sendDataToWatch(basalsString, BASALS_HISTORY_FILENAME)
+            }
         }
     }
 

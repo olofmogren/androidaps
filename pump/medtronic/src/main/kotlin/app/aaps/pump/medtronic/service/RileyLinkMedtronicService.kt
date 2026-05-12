@@ -167,6 +167,7 @@ class RileyLinkMedtronicService : RileyLinkService() {
                 if (!rileyLinkAddress.matches(regexMac.toRegex())) {
                     medtronicPumpStatus.errorDescription = rh.gs(R.string.medtronic_error_rileylink_address_invalid)
                     aapsLogger.debug(LTag.PUMP, "RileyLink address invalid: %s", rileyLinkAddress)
+                    return false
                 } else {
                     if (rileyLinkAddress != this.rileyLinkAddress) {
                         this.rileyLinkAddress = rileyLinkAddress
@@ -216,7 +217,7 @@ class RileyLinkMedtronicService : RileyLinkService() {
                 serialChanged = false
             }
             if (rileyLinkAddressChanged || forceRileyLinkAddressRenewal) {
-                rileyLinkUtil.sendBroadcastMessage(RileyLinkConst.Intents.RileyLinkNewAddressSet, this)
+                rileyLinkUtil.sendBroadcastMessage(RileyLinkConst.Intents.RileyLinkNewAddressSet)
                 rileyLinkAddressChanged = false
             }
             if (encodingChanged) {

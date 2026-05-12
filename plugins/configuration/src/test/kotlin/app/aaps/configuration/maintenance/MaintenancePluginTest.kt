@@ -5,12 +5,14 @@ import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.maintenance.FileListProvider
 import app.aaps.core.interfaces.nsclient.NSSettingsStatus
 import app.aaps.plugins.configuration.maintenance.MaintenancePlugin
+import app.aaps.plugins.configuration.maintenance.cloud.CloudStorageManager
+import app.aaps.plugins.configuration.maintenance.cloud.ExportOptionsDialog
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
-import org.mockito.Mockito.`when`
+import org.mockito.kotlin.whenever
 
 class MaintenancePluginTest : TestBaseWithProfile() {
 
@@ -18,16 +20,18 @@ class MaintenancePluginTest : TestBaseWithProfile() {
     @Mock lateinit var loggerUtils: LoggerUtils
     @Mock lateinit var fileListProvider: FileListProvider
     @Mock lateinit var uel: UserEntryLogger
+    @Mock lateinit var cloudStorageManager: CloudStorageManager
+    @Mock lateinit var exportOptionsDialog: ExportOptionsDialog
 
     private lateinit var sut: MaintenancePlugin
 
     @BeforeEach
     fun mock() {
-        sut = MaintenancePlugin(context, rh, preferences, nsSettingsStatus, aapsLogger, config, fileListProvider, loggerUtils, uel)
-        `when`(loggerUtils.suffix).thenReturn(".log.zip")
-        `when`(loggerUtils.logDirectory).thenReturn("src/test/assets/logger")
+        sut = MaintenancePlugin(context, rh, preferences, nsSettingsStatus, aapsLogger, config, fileListProvider, loggerUtils, uel, cloudStorageManager, exportOptionsDialog)
+        whenever(loggerUtils.suffix).thenReturn(".log.zip")
+        whenever(loggerUtils.logDirectory).thenReturn("src/test/assets/logger")
         // Unknown solution after scoped access
-        //`when`(fileListProvider.ensureTempDirExists()).thenReturn(File("src/test/assets/logger"))
+        //whenever(fileListProvider.ensureTempDirExists()).thenReturn(File("src/test/assets/logger"))
     }
 
     @Test fun logFilesTest() {

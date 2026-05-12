@@ -47,7 +47,6 @@
     <string name="omnipod_common_overview_button_silence_alerts">静默报警</string>
     <string name="omnipod_common_overview_pod_status">Pod状态</string>
     <string name="omnipod_common_overview_total_delivered">输注总量</string>
-    <string name="omnipod_common_overview_total_delivered_value">%1$.2f U</string>
     <string name="omnipod_common_overview_pod_unique_id">唯一 ID</string>
     <string name="omnipod_common_overview_lot_number">批号</string>
     <string name="omnipod_common_overview_pod_sequence_number">序号</string>
@@ -152,12 +151,6 @@
     <string name="omnipod_common_alert_shutdown_imminent">即将关机</string>
     <string name="omnipod_common_alert_low_reservoir">低药量</string>
     <string name="omnipod_common_alert_unknown_alert">未知警报</string>
-    <!-- Omnipod - Short status -->
-    <string name="omnipod_common_short_status_no_active_pod">没有活动的 Pod</string>
-    <string name="omnipod_common_short_status_last_connection">上次连接: %1$d 分钟以前</string>
-    <string name="omnipod_common_short_status_temp_basal">临时: %1$s</string>
-    <string name="omnipod_common_short_status_extended_bolus">扩展: %1$s</string>
-    <string name="omnipod_common_short_status_reservoir">储药器v: %1$sU</string>
     <!-- Omnipod - Other -->
     <string name="omnipod_common_yes">是</string>
     <string name="omnipod_common_no">否</string>

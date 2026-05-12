@@ -31,6 +31,7 @@ import app.aaps.core.interfaces.sharedPreferences.SP
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.SafeParse
+import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.interfaces.versionChecker.VersionCheckerUtils
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.IntKey
@@ -42,6 +43,7 @@ import app.aaps.core.ui.extensions.runOnUiThread
 import app.aaps.core.ui.locale.LocaleHelper
 import app.aaps.core.utils.JsonHelper
 import app.aaps.database.persistence.CompatDBHelper
+import app.aaps.di.AppComponent
 import app.aaps.di.DaggerAppComponent
 import app.aaps.implementation.lifecycle.ProcessLifecycleListener
 import app.aaps.implementation.plugin.PluginStore
@@ -58,8 +60,9 @@ import app.aaps.receivers.KeepAliveWorker
 import app.aaps.receivers.TimeDateOrTZChangeReceiver
 import app.aaps.ui.activityMonitor.ActivityMonitor
 import app.aaps.ui.widget.Widget
-import com.google.firebase.FirebaseApp
+import app.aaps.utils.configureLeakCanary
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings
 import com.google.firebase.remoteconfig.remoteConfig
 import dagger.android.AndroidInjector
@@ -103,6 +106,8 @@ class MainApp : DaggerApplication() {
     @Inject lateinit var rh: Provider<ResourceHelper>
     @Inject lateinit var loop: Loop
     @Inject lateinit var profileFunction: ProfileFunction
+    @Inject lateinit var fabricPrivacy: FabricPrivacy
+    lateinit var appComponent: AppComponent
 
     private var handler = Handler(HandlerThread(this::class.simpleName + "Handler").also { it.start() }.looper)
     private lateinit var refreshWidget: Runnable
@@ -114,6 +119,12 @@ class MainApp : DaggerApplication() {
         // Here should be everything injected
         aapsLogger.debug("onCreate")
         ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleListener.get())
+        // Configure LeakCanary with Firebase reporting
+        // Memory leaks will be uploaded to Firebase Crashlytics via FabricPrivacy.logException
+        configureLeakCanary(
+            isEnabled = !config.disableLeakCanary(),
+            fabricPrivacy = fabricPrivacy
+        )
 
         // Do necessary migrations
         doMigrations()
@@ -144,6 +155,7 @@ class MainApp : DaggerApplication() {
         aapsLogger.debug("Version: " + config.VERSION_NAME)
         aapsLogger.debug("BuildVersion: " + config.BUILD_VERSION)
         aapsLogger.debug("Remote: " + config.REMOTE)
+        aapsLogger.debug("Phone: " + Build.MANUFACTURER + " " + Build.MODEL)
         registerLocalBroadcastReceiver()
         setupRemoteConfig()
 
@@ -355,6 +367,17 @@ class MainApp : DaggerApplication() {
             }
         }
 
+        // Migrate Tidepool from username/password to OAuth2
+        if (sp.contains("tidepool_username") || sp.contains("tidepool_password")) {
+            sp.remove("tidepool_username")
+            sp.remove("tidepool_password")
+            sp.remove("tidepool_test_login")
+            // Clear OAuth2 state to force re-authentication
+            sp.remove("tidepool_auth_state")
+            sp.remove("tidepool_service_configuration")
+            sp.remove("tidepool_subscription_id")
+        }
+
         // Migrate loop mode
         if (config.APS && sp.contains("aps_mode")) {
             val mode = when (sp.getString("aps_mode", "CLOSED")) {
@@ -380,32 +403,46 @@ class MainApp : DaggerApplication() {
     }
 
     override fun applicationInjector(): AndroidInjector<out DaggerApplication> {
-        return DaggerAppComponent
+        appComponent = DaggerAppComponent
             .builder()
             .application(this)
             .build()
+        return appComponent
     }
+
+    private val timeDateReceiver = TimeDateOrTZChangeReceiver()
+    private val networkReceiver = NetworkChangeReceiver()
+    private val chargingReceiver = ChargingStateReceiver()
+    private val btReceiver = BTReceiver()
 
     private fun registerLocalBroadcastReceiver() {
         var filter = IntentFilter()
         filter.addAction(Intent.ACTION_TIME_CHANGED)
         filter.addAction(Intent.ACTION_TIMEZONE_CHANGED)
-        registerReceiver(TimeDateOrTZChangeReceiver(), filter)
+        registerReceiver(timeDateReceiver, filter)
         filter = IntentFilter()
         @Suppress("DEPRECATION")
         filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION)
         filter.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
         filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
-        registerReceiver(NetworkChangeReceiver(), filter)
+        registerReceiver(networkReceiver, filter)
         filter = IntentFilter()
         filter.addAction(Intent.ACTION_POWER_CONNECTED)
         filter.addAction(Intent.ACTION_POWER_DISCONNECTED)
         filter.addAction(Intent.ACTION_BATTERY_CHANGED)
-        registerReceiver(ChargingStateReceiver(), filter)
+        registerReceiver(chargingReceiver, filter)
         filter = IntentFilter()
         filter.addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
         filter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
-        registerReceiver(BTReceiver(), filter)
+        registerReceiver(btReceiver, filter)
+    }
+
+    private fun unregisterReceivers() {
+        super.onTerminate()
+        unregisterReceiver(timeDateReceiver)
+        unregisterReceiver(networkReceiver)
+        unregisterReceiver(chargingReceiver)
+        unregisterReceiver(btReceiver)
     }
 
     private fun setupRemoteConfig() {
@@ -436,6 +473,9 @@ class MainApp : DaggerApplication() {
 
     override fun onTerminate() {
         aapsLogger.debug(LTag.CORE, "onTerminate")
+        handler.removeCallbacksAndMessages(null)
+        handler.looper.quitSafely()
+        unregisterReceivers()
         unregisterActivityLifecycleCallbacks(activityMonitor)
         uiInteraction.stopAlarm("onTerminate")
         super.onTerminate()

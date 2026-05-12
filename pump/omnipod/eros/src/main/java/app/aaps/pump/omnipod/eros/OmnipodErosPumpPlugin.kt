@@ -9,7 +9,6 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.SystemClock
 import android.text.TextUtils
-import android.text.format.DateFormat
 import androidx.preference.PreferenceCategory
 import androidx.preference.PreferenceManager
 import androidx.preference.PreferenceScreen
@@ -24,7 +23,6 @@ import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.notifications.Notification
-import app.aaps.core.interfaces.objects.Instantiator
 import app.aaps.core.interfaces.plugin.OwnDatabasePlugin
 import app.aaps.core.interfaces.plugin.PluginDescription
 import app.aaps.core.interfaces.profile.Profile
@@ -112,12 +110,10 @@ import io.reactivex.rxjava3.kotlin.plusAssign
 import org.joda.time.DateTime
 import org.joda.time.Duration
 import org.joda.time.Instant
-import org.json.JSONException
-import org.json.JSONObject
-import java.lang.Exception
 import java.util.Optional
 import java.util.function.Supplier
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 /**
@@ -147,7 +143,7 @@ class OmnipodErosPumpPlugin @Inject constructor(
     private val uiInteraction: UiInteraction,
     private val erosHistoryDatabase: ErosHistoryDatabase,
     private val decimalFormatter: DecimalFormatter,
-    private val instantiator: Instantiator
+    private val pumpEnactResultProvider: Provider<PumpEnactResult>
 ) : PumpPluginBase(
     pluginDescription = PluginDescription()
         .mainType(PluginType.PUMP)
@@ -397,7 +393,9 @@ class OmnipodErosPumpPlugin @Inject constructor(
     override fun onStop() {
         super.onStop()
         aapsLogger.debug(LTag.PUMP, "OmnipodPumpPlugin.onStop()")
-        loopHandler.removeCallbacks(statusChecker)
+        handler?.removeCallbacksAndMessages(null)
+        handler?.looper?.quit()
+        handler = null
         serviceConnection?.let { context.unbindService(it) }
         serviceConnection = null
         disposable.clear()
@@ -503,7 +501,7 @@ class OmnipodErosPumpPlugin @Inject constructor(
     }
 
     override fun setNewBasalProfile(profile: Profile): PumpEnactResult {
-        if (!podStateManager.hasPodState()) return instantiator.providePumpEnactResult().enacted(false).success(false).comment("Null pod state")
+        if (!podStateManager.hasPodState()) return pumpEnactResultProvider.get().enacted(false).success(false).comment("Null pod state")
         val result: PumpEnactResult = executeCommand(OmnipodCommandType.SET_BASAL_PROFILE) { aapsOmnipodErosManager.setBasalProfile(profile, true) }!!
 
         aapsLogger.info(LTag.PUMP, "Basal Profile was set: " + result.success)
@@ -518,7 +516,9 @@ class OmnipodErosPumpPlugin @Inject constructor(
             true
         } else podStateManager.basalSchedule == AapsOmnipodErosManager.mapProfileToBasalSchedule(profile)
 
-    override fun lastDataTime(): Long = if (podStateManager.isPodInitialized) podStateManager.lastSuccessfulCommunication.millis else 0
+    override val lastBolusTime: Long? get() = null
+    override val lastBolusAmount: Double? get() = null
+    override val lastDataTime: Long get() = if (podStateManager.isPodInitialized) podStateManager.lastSuccessfulCommunication.millis else 0
 
     override val baseBasalRate: Double
         get() =
@@ -532,10 +532,8 @@ class OmnipodErosPumpPlugin @Inject constructor(
             // When it's over 50 units, we don't know, so return some default over 50 units
             else podStateManager.reservoirLevel ?: RESERVOIR_OVER_50_UNITS_DEFAULT
 
-    override val batteryLevel: Int
-        get() =
-            if (aapsOmnipodErosManager.isShowRileyLinkBatteryLevel) Optional.ofNullable<Int?>(rileyLinkServiceData.batteryLevel).orElse(0)
-            else 0
+    override val batteryLevel: Int?
+        get() = if (aapsOmnipodErosManager.isShowRileyLinkBatteryLevel) rileyLinkServiceData.batteryLevel else null
 
     override fun deliverTreatment(detailedBolusInfo: DetailedBolusInfo): PumpEnactResult {
         if (detailedBolusInfo.insulin == 0.0 || detailedBolusInfo.carbs > 0) {
@@ -554,7 +552,7 @@ class OmnipodErosPumpPlugin @Inject constructor(
         aapsLogger.info(LTag.PUMP, "setTempBasalAbsolute: rate: {}, duration={}", absoluteRate, durationInMinutes)
 
         if (durationInMinutes <= 0 || durationInMinutes % OmnipodConstants.BASAL_STEP_DURATION.standardMinutes != 0L) {
-            return instantiator.providePumpEnactResult().success(false).comment(rh.gs(R.string.omnipod_eros_error_set_temp_basal_failed_validation, OmnipodConstants.BASAL_STEP_DURATION.standardMinutes))
+            return pumpEnactResultProvider.get().success(false).comment(rh.gs(R.string.omnipod_eros_error_set_temp_basal_failed_validation, OmnipodConstants.BASAL_STEP_DURATION.standardMinutes))
         }
 
         // read current TBR
@@ -570,7 +568,7 @@ class OmnipodErosPumpPlugin @Inject constructor(
         if (tbrCurrent != null && !enforceNew) {
             if (isSame(tbrCurrent.rate, absoluteRate)) {
                 aapsLogger.info(LTag.PUMP, "setTempBasalAbsolute - No enforceNew and same rate. Exiting.")
-                return instantiator.providePumpEnactResult().success(true).enacted(false)
+                return pumpEnactResultProvider.get().success(true).enacted(false)
             }
         }
 
@@ -591,111 +589,22 @@ class OmnipodErosPumpPlugin @Inject constructor(
 
         if (tbrCurrent == null) {
             aapsLogger.info(LTag.PUMP, "cancelTempBasal - TBR already cancelled.")
-            return instantiator.providePumpEnactResult().success(true).enacted(false)
+            return pumpEnactResultProvider.get().success(true).enacted(false)
         }
 
         return executeCommand<PumpEnactResult?>(OmnipodCommandType.CANCEL_TEMPORARY_BASAL) { aapsOmnipodErosManager.cancelTemporaryBasal() }!!
     }
 
-    // TODO improve (i8n and more)
-    override fun getJSONStatus(profile: Profile, profileName: String, version: String): JSONObject {
-        if (!podStateManager.isPodActivationCompleted || lastConnectionTimeMillis + 60 * 60 * 1000L < System.currentTimeMillis()) {
-            return JSONObject()
-        }
-
-        val now = System.currentTimeMillis()
-        val pump = JSONObject()
-        val battery = JSONObject()
-        val status = JSONObject()
-        val extended = JSONObject()
-        try {
-            status.put("status", if (podStateManager.isPodRunning) (if (podStateManager.isSuspended) "suspended" else "normal") else "no active Pod")
-            status.put("timestamp", dateUtil.toISOString(dateUtil.now()))
-
-            battery.put("percent", batteryLevel)
-
-            extended.put("Version", version)
-            extended.put("ActiveProfile", profileName)
-
-            val tb = pumpSync.expectedPumpState().temporaryBasal
-            if (tb != null) {
-                extended.put("TempBasalAbsoluteRate", tb.convertedToAbsolute(now, profile))
-                extended.put("TempBasalStart", dateUtil.dateAndTimeString(tb.timestamp))
-                extended.put("TempBasalRemaining", tb.plannedRemainingMinutes)
-            }
-            val eb = pumpSync.expectedPumpState().extendedBolus
-            if (eb != null) {
-                extended.put("ExtendedBolusAbsoluteRate", eb.rate)
-                extended.put("ExtendedBolusStart", dateUtil.dateAndTimeString(eb.timestamp))
-                extended.put("ExtendedBolusRemaining", eb.plannedRemainingMinutes)
-            }
-
-            status.put("timestamp", dateUtil.toISOString(dateUtil.now()))
-
-            if (isUseRileyLinkBatteryLevel()) {
-                pump.put("battery", battery)
-            }
-
-            pump.put("status", status)
-            pump.put("extended", extended)
-
-            val reservoirLevel = reservoirLevel
-            if (reservoirLevel > OmnipodConstants.MAX_RESERVOIR_READING) {
-                pump.put("reservoir_display_override", "50+")
-                pump.put("reservoir", OmnipodConstants.MAX_RESERVOIR_READING)
-            } else {
-                pump.put("reservoir", reservoirLevel)
-            }
-
-            pump.put("clock", dateUtil.toISOString(podStateManager.getTime().millis))
-        } catch (e: JSONException) {
-            aapsLogger.error(LTag.PUMP, "Unhandled exception", e)
-        }
-        return pump
-    }
-
     override fun manufacturer(): ManufacturerType = pumpType.manufacturer()
-
     override fun model(): PumpType = pumpType
-
     override fun serialNumber(): String = if (podStateManager.isPodInitialized) podStateManager.address.toString() else "-"
-
-    override fun shortStatus(veryShort: Boolean): String {
-        if (!podStateManager.isPodActivationCompleted) {
-            return rh.gs(app.aaps.pump.omnipod.common.R.string.omnipod_common_short_status_no_active_pod)
-        }
-        var ret = ""
-        if (lastConnectionTimeMillis != 0L) {
-            @Suppress("SpellCheckingInspection") val agoMsec = System.currentTimeMillis() - lastConnectionTimeMillis
-            val agoMin = (agoMsec / 60.0 / 1000.0).toInt()
-            ret += rh.gs(app.aaps.pump.omnipod.common.R.string.omnipod_common_short_status_last_connection, agoMin) + "\n"
-        }
-        if (podStateManager.lastBolusStartTime != null) {
-            ret += rh.gs(
-                app.aaps.pump.omnipod.common.R.string.omnipod_common_short_status_last_bolus, decimalFormatter.to2Decimal(podStateManager.lastBolusAmount),
-                DateFormat.format("HH:mm", podStateManager.lastBolusStartTime.toDate())
-            ) + "\n"
-        }
-        val pumpState = pumpSync.expectedPumpState()
-        if (pumpState.temporaryBasal != null && pumpState.profile != null) {
-            ret += rh.gs(app.aaps.pump.omnipod.common.R.string.omnipod_common_short_status_temp_basal, pumpState.temporaryBasal!!.toStringFull(dateUtil, rh) + "\n")
-        }
-        if (pumpState.extendedBolus != null) {
-            ret += rh.gs(app.aaps.pump.omnipod.common.R.string.omnipod_common_short_status_extended_bolus, pumpState.extendedBolus!!.toStringFull(dateUtil, rh) + "\n")
-        }
-        ret += rh.gs(app.aaps.pump.omnipod.common.R.string.omnipod_common_short_status_reservoir, (if (reservoirLevel > OmnipodConstants.MAX_RESERVOIR_READING) "50+" else decimalFormatter.to0Decimal(reservoirLevel))) + "\n"
-        if (isUseRileyLinkBatteryLevel()) {
-            ret += rh.gs(R.string.omnipod_eros_short_status_riley_link_battery, batteryLevel) + "\n"
-        }
-        return ret.trim { it <= ' ' }
-    }
 
     override fun executeCustomAction(customActionType: CustomActionType) {
         aapsLogger.warn(LTag.PUMP, "Unknown custom action: $customActionType")
     }
 
     override fun executeCustomCommand(customCommand: CustomCommand): PumpEnactResult? {
-        if (!podStateManager.hasPodState()) return instantiator.providePumpEnactResult().enacted(false).success(false).comment("Null pod state")
+        if (!podStateManager.hasPodState()) return pumpEnactResultProvider.get().enacted(false).success(false).comment("Null pod state")
         if (customCommand is CommandSilenceAlerts) {
             return executeCommand<PumpEnactResult?>(OmnipodCommandType.ACKNOWLEDGE_ALERTS) { aapsOmnipodErosManager.acknowledgeAlerts() }
         }
@@ -725,7 +634,7 @@ class OmnipodErosPumpPlugin @Inject constructor(
         }
 
         aapsLogger.warn(LTag.PUMP, "Unsupported custom command: " + customCommand.javaClass.getName())
-        return instantiator.providePumpEnactResult().success(false).enacted(false).comment(rh.gs(app.aaps.pump.omnipod.common.R.string.omnipod_common_error_unsupported_custom_command, customCommand.javaClass.getName()))
+        return pumpEnactResultProvider.get().success(false).enacted(false).comment(rh.gs(app.aaps.pump.omnipod.common.R.string.omnipod_common_error_unsupported_custom_command, customCommand.javaClass.getName()))
     }
 
     private fun retrievePulseLog(): PumpEnactResult {
@@ -733,11 +642,11 @@ class OmnipodErosPumpPlugin @Inject constructor(
         try {
             result = executeCommand(OmnipodCommandType.READ_POD_PULSE_LOG) { aapsOmnipodErosManager.readPulseLog() }!!
         } catch (ex: Exception) {
-            return instantiator.providePumpEnactResult().success(false).enacted(false).comment(aapsOmnipodErosManager.translateException(ex))
+            return pumpEnactResultProvider.get().success(false).enacted(false).comment(aapsOmnipodErosManager.translateException(ex))
         }
 
         uiInteraction.runAlarm(rh.gs(R.string.omnipod_eros_pod_management_pulse_log_value) + ":\n" + result.toString(), rh.gs(R.string.omnipod_eros_pod_management_pulse_log), 0)
-        return instantiator.providePumpEnactResult().success(true).enacted(false)
+        return pumpEnactResultProvider.get().success(true).enacted(false)
     }
 
     private fun updateAlertConfiguration(): PumpEnactResult {
@@ -981,7 +890,7 @@ class OmnipodErosPumpPlugin @Inject constructor(
     }
 
     private fun getOperationNotSupportedWithCustomText(resourceId: Int): PumpEnactResult {
-        return instantiator.providePumpEnactResult().success(false).enacted(false).comment(resourceId)
+        return pumpEnactResultProvider.get().success(false).enacted(false).comment(resourceId)
     }
 
     override fun clearAllTables() {

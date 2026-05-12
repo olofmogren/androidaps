@@ -4,8 +4,6 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Handler
-import android.os.HandlerThread
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -22,19 +20,20 @@ import app.aaps.pump.common.hw.rileylink.service.tasks.ServiceTask
 import app.aaps.pump.common.hw.rileylink.service.tasks.ServiceTaskExecutor
 import app.aaps.pump.common.hw.rileylink.service.tasks.WakeAndTuneTask
 import dagger.android.DaggerBroadcastReceiver
-import dagger.android.HasAndroidInjector
 import javax.inject.Inject
+import javax.inject.Provider
 
 class RileyLinkBroadcastReceiver : DaggerBroadcastReceiver() {
 
-    @Inject lateinit var injector: HasAndroidInjector
     @Inject lateinit var preferences: Preferences
     @Inject lateinit var aapsLogger: AAPSLogger
     @Inject lateinit var rileyLinkServiceData: RileyLinkServiceData
     @Inject lateinit var serviceTaskExecutor: ServiceTaskExecutor
     @Inject lateinit var activePlugin: ActivePlugin
+    @Inject lateinit var wakeAndTuneTaskProvider: Provider<WakeAndTuneTask>
+    @Inject lateinit var initializePumpManagerTaskProvider: Provider<InitializePumpManagerTask>
+    @Inject lateinit var discoverGattServicesTaskProvider: Provider<DiscoverGattServicesTask>
 
-    private var handler = Handler(HandlerThread(this::class.simpleName + "Handler").also { it.start() }.looper)
     private val broadcastIdentifiers: MutableMap<String, List<String>> = HashMap()
 
     init {
@@ -71,11 +70,11 @@ class RileyLinkBroadcastReceiver : DaggerBroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         val action = intent.action ?: return
-        handler.post {
+        Thread {
             aapsLogger.debug(LTag.PUMPBTCOMM, "Received Broadcast: $action")
             if (!processBluetoothBroadcasts(action) && !processRileyLinkBroadcasts(action, context) && !processTuneUpBroadcasts(action))
                 aapsLogger.error(LTag.PUMPBTCOMM, "Unhandled broadcast: action=$action")
-        }
+        }.start()
     }
 
     fun registerBroadcasts(context: Context) {
@@ -113,7 +112,7 @@ class RileyLinkBroadcastReceiver : DaggerBroadcastReceiver() {
 
                 aapsLogger.debug(LTag.PUMPBTCOMM, "RfSpy Radio version (CC110): ${rlVersion?.name}")
                 rileyLinkServiceData.firmwareVersion = rlVersion
-                val task: ServiceTask = InitializePumpManagerTask(injector, context)
+                val task: ServiceTask = initializePumpManagerTaskProvider.get()
                 serviceTaskExecutor.startTask(task)
                 aapsLogger.info(LTag.PUMPBTCOMM, "Announcing RileyLink open For business")
                 true
@@ -138,14 +137,14 @@ class RileyLinkBroadcastReceiver : DaggerBroadcastReceiver() {
         when (action) {
             RileyLinkConst.Intents.BluetoothConnected   -> {
                 aapsLogger.debug(LTag.PUMPBTCOMM, "Bluetooth - Connected")
-                serviceTaskExecutor.startTask(DiscoverGattServicesTask(injector))
+                serviceTaskExecutor.startTask(discoverGattServicesTaskProvider.get())
                 true
             }
 
             RileyLinkConst.Intents.BluetoothReconnected -> {
                 aapsLogger.debug(LTag.PUMPBTCOMM, "Bluetooth - Reconnecting")
                 rileyLinkService?.bluetoothInit()
-                serviceTaskExecutor.startTask(DiscoverGattServicesTask(injector, true))
+                serviceTaskExecutor.startTask(discoverGattServicesTaskProvider.get().with(true))
                 true
             }
 
@@ -154,7 +153,7 @@ class RileyLinkBroadcastReceiver : DaggerBroadcastReceiver() {
 
     private fun processTuneUpBroadcasts(action: String): Boolean =
         if (broadcastIdentifiers["TuneUp"]?.contains(action) == true) {
-            if (rileyLinkServiceData.targetDevice.tuneUpEnabled == true) serviceTaskExecutor.startTask(WakeAndTuneTask(injector))
+            if (rileyLinkServiceData.targetDevice.tuneUpEnabled) serviceTaskExecutor.startTask(wakeAndTuneTaskProvider.get())
             true
         } else false
 }

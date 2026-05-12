@@ -82,6 +82,7 @@ class VirtualPumpFragment : DaggerFragment() {
 
         binding.pumpSuspended.isChecked = preferences.get(VirtualBooleanNonPreferenceKey.IsSuspended)
         binding.pumpSuspended.setOnClickListener { preferences.put(VirtualBooleanNonPreferenceKey.IsSuspended, binding.pumpSuspended.isChecked) }
+
         updateGui()
     }
 
@@ -96,6 +97,12 @@ class VirtualPumpFragment : DaggerFragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        handler.removeCallbacksAndMessages(null)
+        handler.looper.quitSafely()
     }
 
     @Synchronized

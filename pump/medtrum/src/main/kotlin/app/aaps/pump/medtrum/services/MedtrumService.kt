@@ -73,7 +73,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.math.abs
-import kotlin.math.round
 
 class MedtrumService : DaggerService(), BLECommCallback {
 
@@ -256,12 +255,11 @@ class MedtrumService : DaggerService(), BLECommCallback {
         updateTimeIfNeeded(false)
         // Check if there is active bolus but it is not being monitored
         // if so wait for bolus and show progress
-        if (!medtrumPump.bolusDone && medtrumPump.bolusingTreatment == null) {
+        if (!medtrumPump.bolusDone) {
             val detailedBolusInfo = detailedBolusInfoStorage.findDetailedBolusInfo(medtrumPump.bolusStartTime, medtrumPump.bolusAmountToBeDelivered)
             if (detailedBolusInfo != null) {
                 detailedBolusInfoStorage.add(detailedBolusInfo) // Reinsert
             }
-            medtrumPump.bolusingTreatment = EventOverviewBolusProgress.Treatment(0.0, 0, detailedBolusInfo?.bolusType == BS.Type.SMB, detailedBolusInfo?.id ?: 0)
             if (detailedBolusInfo?.bolusType == BS.Type.SMB) {
                 rxBus.send(EventPumpStatusChanged(rh.gs(app.aaps.core.ui.R.string.smb_bolus_u, detailedBolusInfo.insulin)))
             } else {
@@ -350,27 +348,27 @@ class MedtrumService : DaggerService(), BLECommCallback {
         return sendPacketAndGetResponse(SetPatchPacket(injector))
     }
 
-    fun setBolus(detailedBolusInfo: DetailedBolusInfo, t: EventOverviewBolusProgress.Treatment): Boolean {
+    fun setBolus(detailedBolusInfo: DetailedBolusInfo): Boolean {
         if (!canSetBolus()) return false
 
         val insulin = detailedBolusInfo.insulin
         medtrumPump.bolusDone = false
         medtrumPump.bolusStopped = false
         medtrumPump.bolusErrorReason = null
+        BolusProgressData.delivered = 0.0
 
         if (!sendBolusCommand(insulin)) {
             medtrumPump.bolusErrorReason = rh.gs(R.string.bolus_error_reason_unable_to_send_command)
             aapsLogger.error(LTag.PUMPCOMM, "Failed to set bolus")
             commandQueue.readStatus(rh.gs(R.string.bolus_error), null) // make sure if anything is delivered (which is highly unlikely at this point) we get it
             medtrumPump.bolusDone = true
-            t.insulin = 0.0
+            BolusProgressData.delivered = 0.0
             return false
         }
 
         val bolusStart = System.currentTimeMillis()
         medtrumPump.bolusProgressLastTimeStamp = bolusStart
         medtrumPump.bolusStartTime = bolusStart
-        medtrumPump.bolusingTreatment = t
         medtrumPump.bolusAmountToBeDelivered = insulin
 
         detailedBolusInfo.timestamp = bolusStart // Make sure the timestamp is set to the start of the bolus
@@ -395,7 +393,7 @@ class MedtrumService : DaggerService(), BLECommCallback {
 
         waitForBolusProgress()
 
-        if (medtrumPump.bolusStopped && t.insulin == 0.0) {
+        if (medtrumPump.bolusStopped && BolusProgressData.delivered == 0.0) {
             // In this case we don't get a bolus end event, so need to remove all the stuff added previously
             val syncOk = pumpSync.syncBolusWithTempId(
                 timestamp = bolusStart,
@@ -446,7 +444,6 @@ class MedtrumService : DaggerService(), BLECommCallback {
     }
 
     private fun waitForBolusProgress() {
-        val bolusingEvent = EventOverviewBolusProgress
         var communicationLost = false
         var connectionRetryCounter = 0
         var checkTime = medtrumPump.bolusProgressLastTimeStamp
@@ -468,19 +465,14 @@ class MedtrumService : DaggerService(), BLECommCallback {
                     disconnect("Communication stopped")
                 }
             } else {
-                val currentBolusAmount = medtrumPump.bolusingTreatment?.insulin
-
-                if (currentBolusAmount != null && currentBolusAmount != lastSentBolusAmount) {
-                    bolusingEvent.t = medtrumPump.bolusingTreatment
-                    bolusingEvent.status = rh.gs(app.aaps.pump.common.R.string.bolus_delivered_so_far, medtrumPump.bolusingTreatment?.insulin, medtrumPump.bolusAmountToBeDelivered)
-                    bolusingEvent.percent = round(currentBolusAmount.div(medtrumPump.bolusAmountToBeDelivered) * 100).toInt() - 1
-                    rxBus.send(bolusingEvent)
+                val currentBolusAmount = BolusProgressData.delivered
+                if (currentBolusAmount != lastSentBolusAmount) {
+                    rxBus.send(EventOverviewBolusProgress(rh, BolusProgressData.delivered))
                     lastSentBolusAmount = currentBolusAmount
                 }
             }
         }
 
-        bolusingEvent.percent = 99
         val bolusDurationInMSec = (medtrumPump.bolusAmountToBeDelivered * 60 * 1000)
         val expectedEnd = medtrumPump.bolusStartTime + bolusDurationInMSec + 1000
         while (System.currentTimeMillis() < expectedEnd && !medtrumPump.bolusDone) {
@@ -490,20 +482,16 @@ class MedtrumService : DaggerService(), BLECommCallback {
         // Allow time for notification packet with new sequence number to arrive
         SystemClock.sleep(2000)
 
-        bolusingEvent.t = medtrumPump.bolusingTreatment
-        medtrumPump.bolusingTreatment = null
-
         // Do not call update status directly, reconnection may be needed
         commandQueue.loadEvents(object : Callback() {
             override fun run() {
                 rxBus.send(EventPumpStatusChanged(rh.gs(R.string.getting_bolus_status)))
-                bolusingEvent.percent = 100
             }
         })
     }
 
     fun stopBolus() {
-        aapsLogger.debug(LTag.PUMPCOMM, "bolusStop >>>>> @ " + if (medtrumPump.bolusingTreatment == null) "" else medtrumPump.bolusingTreatment?.insulin)
+        aapsLogger.debug(LTag.PUMPCOMM, "bolusStop >>>>> @ ${BolusProgressData.delivered}")
         medtrumPump.bolusErrorReason = rh.gs(R.string.bolus_error_reason_user)
         if (isConnected) {
             var success = sendPacketAndGetResponse(CancelBolusPacket(injector))
@@ -652,7 +640,31 @@ class MedtrumService : DaggerService(), BLECommCallback {
             }
 
             MedtrumPumpState.IDLE,
-            MedtrumPumpState.FILLED,
+            MedtrumPumpState.FILLED               -> {
+                rxBus.send(EventDismissNotification(Notification.PUMP_ERROR))
+                rxBus.send(EventDismissNotification(Notification.PUMP_SUSPENDED))
+                medtrumPump.setFakeTBRIfNotSet()
+                medtrumPump.clearAlarmState()
+
+                if (medtrumPump.patchPrimed) {
+                    aapsLogger.error(LTag.PUMP, "handlePumpStateUpdate: Unexpected patch state drop while primed! state: $state")
+
+                    pumpSync.insertAnnouncement(
+                        rh.gs(R.string.patch_reset_after_primed_error),
+                        null,
+                        medtrumPump.pumpType(),
+                        medtrumPump.pumpSN.toString(radix = 16)
+                    )
+
+                    uiInteraction.addNotificationWithSound(
+                        Notification.PUMP_ERROR,
+                        rh.gs(R.string.patch_reset_after_primed_error),
+                        Notification.URGENT,
+                        app.aaps.core.ui.R.raw.alarm
+                    )
+                }
+            }
+
             MedtrumPumpState.PRIMING,
             MedtrumPumpState.PRIMED,
             MedtrumPumpState.EJECTING,

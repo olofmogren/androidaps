@@ -25,7 +25,6 @@ import app.aaps.core.interfaces.constraints.PluginConstraints
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.notifications.Notification
-import app.aaps.core.interfaces.objects.Instantiator
 import app.aaps.core.interfaces.plugin.PluginDescription
 import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
@@ -40,13 +39,11 @@ import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventDismissNotification
 import app.aaps.core.interfaces.rx.events.EventInitializationChanged
 import app.aaps.core.interfaces.rx.events.EventOverviewBolusProgress
-import app.aaps.core.interfaces.rx.events.EventOverviewBolusProgress.Treatment
 import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
 import app.aaps.core.interfaces.sharedPreferences.SP
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.DateUtil
-import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.ui.dialogs.OKDialog
@@ -98,13 +95,11 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 import org.joda.time.DateTime
-import org.json.JSONException
 import org.json.JSONObject
 import java.util.Locale
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 import kotlin.math.max
 import kotlin.math.min
@@ -134,8 +129,7 @@ class ComboV2Plugin @Inject constructor(
     private val uiInteraction: UiInteraction,
     private val androidPermission: AndroidPermission,
     private val config: Config,
-    private val decimalFormatter: DecimalFormatter,
-    private val instantiator: Instantiator
+    private val pumpEnactResultProvider: Provider<PumpEnactResult>
 ) :
     PumpPluginBase(
         pluginDescription = PluginDescription()
@@ -845,7 +839,7 @@ class ComboV2Plugin @Inject constructor(
                 Notification.URGENT
             )
 
-            return instantiator.providePumpEnactResult().apply {
+            return pumpEnactResultProvider.get().apply {
                 success = false
                 enacted = false
                 comment = rh.gs(app.aaps.core.ui.R.string.pump_not_initialized_profile_not_set)
@@ -857,7 +851,7 @@ class ComboV2Plugin @Inject constructor(
         rxBus.send(EventDismissNotification(Notification.PROFILE_NOT_SET_NOT_INITIALIZED))
         rxBus.send(EventDismissNotification(Notification.FAILED_UPDATE_PROFILE))
 
-        val pumpEnactResult = instantiator.providePumpEnactResult()
+        val pumpEnactResult = pumpEnactResultProvider.get()
 
         val requestedBasalProfile = profile.toComboCtlBasalProfile()
         aapsLogger.debug(LTag.PUMP, "Basal profile to set: $requestedBasalProfile")
@@ -931,8 +925,11 @@ class ComboV2Plugin @Inject constructor(
         return (activeBasalProfile == profile.toComboCtlBasalProfile())
     }
 
-    override fun lastDataTime(): Long = lastConnectionTimestamp
+    override val lastDataTime: Long get() = lastConnectionTimestamp
 
+    @OptIn(ExperimentalTime::class)
+    override val lastBolusTime: Long? get() = lastBolusUIFlow.value?.timestamp?.toEpochMilliseconds()
+    override val lastBolusAmount: Double? get() = lastBolusUIFlow.value?.bolusAmount?.cctlBolusToIU()
     override val baseBasalRate: Double
         get() {
             val currentHour = DateTime().hourOfDay().get()
@@ -948,8 +945,8 @@ class ComboV2Plugin @Inject constructor(
         get() = _reservoirLevel ?: 0.0
 
     private var _batteryLevel: Int? = null
-    override val batteryLevel: Int
-        get() = _batteryLevel ?: 0
+    override val batteryLevel: Int?
+        get() = _batteryLevel
 
     private fun updateLevels() {
         pumpStatus?.availableUnitsInReservoir?.let { newLevel ->
@@ -1018,7 +1015,7 @@ class ComboV2Plugin @Inject constructor(
             BS.Type.PRIMING -> ComboCtlPump.StandardBolusReason.PRIMING_INFUSION_SET
         }
 
-        val pumpEnactResult = instantiator.providePumpEnactResult()
+        val pumpEnactResult = pumpEnactResultProvider.get()
         pumpEnactResult.success = false
 
         if (isSuspended()) {
@@ -1031,34 +1028,16 @@ class ComboV2Plugin @Inject constructor(
             return pumpEnactResult
         }
 
-        // Set up initial bolus progress along with details that are invariant.
-        // FIXME: EventOverviewBolusProgress is a singleton purely for
-        // historical reasons and could be updated to be a regular
-        // class. So far, this hasn't been done, so we must use it
-        // like a singleton, at least for now.
-        EventOverviewBolusProgress.t = Treatment(
-            insulin = 0.0,
-            carbs = 0,
-            isSMB = detailedBolusInfo.bolusType === BS.Type.SMB,
-            id = detailedBolusInfo.id
-        )
-
         val bolusProgressJob = pumpCoroutineScope.launch {
             acquiredPump.bolusDeliveryProgressFlow
                 .collect { progressReport ->
                     when (progressReport.stage) {
                         is RTCommandProgressStage.DeliveringBolus -> {
-                            val bolusingEvent = EventOverviewBolusProgress
-                            bolusingEvent.percent = (progressReport.overallProgress * 100.0).toInt()
-                            bolusingEvent.status = rh.gs(app.aaps.core.ui.R.string.bolus_delivering, detailedBolusInfo.insulin)
-                            rxBus.send(bolusingEvent)
+                            rxBus.send(EventOverviewBolusProgress(rh, id = detailedBolusInfo.id, percent = (progressReport.overallProgress * 100).toInt()))
                         }
 
                         BasicProgressStage.Finished               -> {
-                            val bolusingEvent = EventOverviewBolusProgress
-                            bolusingEvent.percent = (progressReport.overallProgress * 100.0).toInt()
-                            bolusingEvent.status = "Bolus finished, performing post-bolus checks"
-                            rxBus.send(bolusingEvent)
+                            rxBus.send(EventOverviewBolusProgress("Bolus finished, performing post-bolus checks", detailedBolusInfo.id, (progressReport.overallProgress * 100).toInt()))
                         }
 
                         else                                      -> Unit
@@ -1085,12 +1064,12 @@ class ComboV2Plugin @Inject constructor(
                     acquiredPump.deliverBolus(requestedBolusAmount, bolusReason)
                 }
 
-                reportFinishedBolus(rh.gs(app.aaps.core.ui.R.string.bolus_delivered_successfully, detailedBolusInfo.insulin), pumpEnactResult, succeeded = true)
+                reportFinishedBolus(rh.gs(app.aaps.core.interfaces.R.string.bolus_delivered_successfully, detailedBolusInfo.insulin), detailedBolusInfo.id, pumpEnactResult, succeeded = true)
             } catch (e: CancellationException) {
                 // Cancellation is not an error, but it also means
                 // that the profile update was not enacted.
 
-                reportFinishedBolus(R.string.combov2_bolus_cancelled, pumpEnactResult, succeeded = true)
+                reportFinishedBolus(R.string.combov2_bolus_cancelled, detailedBolusInfo.id, pumpEnactResult, succeeded = true)
 
                 // Rethrowing to finish coroutine cancellation.
                 throw e
@@ -1103,19 +1082,19 @@ class ComboV2Plugin @Inject constructor(
                 // CancellationException block above, this is not an
                 // error, hence the "success = true".
 
-                reportFinishedBolus(R.string.combov2_bolus_cancelled, pumpEnactResult, succeeded = true)
+                reportFinishedBolus(R.string.combov2_bolus_cancelled, detailedBolusInfo.id, pumpEnactResult, succeeded = true)
             } catch (_: ComboCtlPump.BolusNotDeliveredException) {
                 aapsLogger.error(LTag.PUMP, "Bolus not delivered")
-                reportFinishedBolus(R.string.combov2_bolus_not_delivered, pumpEnactResult, succeeded = false)
+                reportFinishedBolus(R.string.combov2_bolus_not_delivered, detailedBolusInfo.id, pumpEnactResult, succeeded = false)
             } catch (_: ComboCtlPump.UnaccountedBolusDetectedException) {
                 aapsLogger.error(LTag.PUMP, "Unaccounted bolus detected")
-                reportFinishedBolus(R.string.combov2_unaccounted_bolus_detected_cancelling_bolus, pumpEnactResult, succeeded = false)
+                reportFinishedBolus(R.string.combov2_unaccounted_bolus_detected_cancelling_bolus, detailedBolusInfo.id, pumpEnactResult, succeeded = false)
             } catch (_: ComboCtlPump.InsufficientInsulinAvailableException) {
                 aapsLogger.error(LTag.PUMP, "Insufficient insulin in reservoir")
-                reportFinishedBolus(R.string.combov2_insufficient_insulin_in_reservoir, pumpEnactResult, succeeded = false)
+                reportFinishedBolus(R.string.combov2_insufficient_insulin_in_reservoir, detailedBolusInfo.id, pumpEnactResult, succeeded = false)
             } catch (e: Exception) {
                 aapsLogger.error(LTag.PUMP, "Exception thrown during bolus delivery: $e")
-                reportFinishedBolus(R.string.combov2_bolus_delivery_failed, pumpEnactResult, succeeded = false)
+                reportFinishedBolus(R.string.combov2_bolus_delivery_failed, detailedBolusInfo.id, pumpEnactResult, succeeded = false)
             } finally {
                 // The delivery was enacted if even a partial amount was infused.
                 acquiredPump.lastBolusFlow.value?.also {
@@ -1163,7 +1142,7 @@ class ComboV2Plugin @Inject constructor(
     }
 
     override fun setTempBasalAbsolute(absoluteRate: Double, durationInMinutes: Int, profile: Profile, enforceNew: Boolean, tbrType: PumpSync.TemporaryBasalType): PumpEnactResult {
-        val pumpEnactResult = instantiator.providePumpEnactResult()
+        val pumpEnactResult = pumpEnactResultProvider.get()
         pumpEnactResult.isPercent = false
 
         // Corner case: Current base basal rate is 0 IU. We cannot do
@@ -1214,7 +1193,7 @@ class ComboV2Plugin @Inject constructor(
     }
 
     override fun setTempBasalPercent(percent: Int, durationInMinutes: Int, profile: Profile, enforceNew: Boolean, tbrType: PumpSync.TemporaryBasalType): PumpEnactResult {
-        val pumpEnactResult = instantiator.providePumpEnactResult()
+        val pumpEnactResult = pumpEnactResultProvider.get()
         pumpEnactResult.isPercent = true
 
         val roundedPercentage = ((percent + 5) / 10) * 10
@@ -1246,7 +1225,7 @@ class ComboV2Plugin @Inject constructor(
     }
 
     override fun cancelTempBasal(enforceNew: Boolean): PumpEnactResult {
-        val pumpEnactResult = instantiator.providePumpEnactResult()
+        val pumpEnactResult = pumpEnactResultProvider.get()
         pumpEnactResult.isPercent = true
         pumpEnactResult.isTempCancel = enforceNew
         setTbrInternal(100, 0, tbrType = ComboCtlTbr.Type.NORMAL, force100Percent = enforceNew, pumpEnactResult)
@@ -1330,103 +1309,16 @@ class ComboV2Plugin @Inject constructor(
     override fun cancelExtendedBolus(): PumpEnactResult =
         createFailurePumpEnactResult(R.string.combov2_extended_bolus_not_supported)
 
-    @OptIn(ExperimentalTime::class)
-    override fun getJSONStatus(profile: Profile, profileName: String, version: String): JSONObject {
-        if (!isInitialized())
-            return JSONObject()
+    override fun updateExtendedJsonStatus(extendedStatus: JSONObject) {
+        when (val alert = lastComboAlert) {
+            is AlertScreenContent.Warning ->
+                extendedStatus.put("WarningCode", alert.code)
 
-        val now = dateUtil.now()
-        if ((lastConnectionTimestamp != 0L) && ((now - lastConnectionTimestamp) > 60 * 60 * 1000)) {
-            return JSONObject()
+            is AlertScreenContent.Error   ->
+                extendedStatus.put("ErrorCode", alert.code)
+
+            else                          -> Unit
         }
-        val pumpJson = JSONObject()
-
-        try {
-            pumpJson.apply {
-                put("clock", dateUtil.toISOString(now))
-                // NOTE: This is called "status" because this is what the
-                // Nightscout pump plugin API schema expects. It is not to
-                // be confused with the "status" in the ComboCtl Pump class.
-                // Also not to be confused with the "status" field inside
-                // this "status" JSON object.
-                // See the Nightscout /devicestatus/ API docs for more.
-                put("status", JSONObject().apply {
-                    val driverState = driverStateFlow.value
-                    val suspended = isSuspended()
-                    val bolusing = (driverState is DriverState.ExecutingCommand) &&
-                        (driverState.description is ComboCtlPump.DeliveringBolusCommandDesc)
-                    // The value of the "status" string isn't well defined.
-                    // Commonly used ones seem to be "normal", "suspended",
-                    // and "bolusing". The latter two are already enforced
-                    // by the corresponding boolean flags, but we set them
-                    // in this string anyway. It may be a legacy feature
-                    // from older Nightscout iterations. Furthermore, we do
-                    // set this to "error" in case of pump errors to alert
-                    // users of Nightscout to possible problems with the pump.
-                    val statusLabel = if (bolusing)
-                        "bolusing"
-                    else if (suspended)
-                        "suspended"
-                    else if (driverState == DriverState.Error)
-                        "error"
-                    else
-                        "normal"
-                    put("status", statusLabel)
-                    put("suspended", suspended)
-                    put("bolusing", bolusing)
-                    put("timestamp", dateUtil.toISOString(lastConnectionTimestamp))
-                })
-                pumpStatus?.let {
-                    // Battery level is set inside this let-block as well. Even though
-                    // batteryLevel is not a direct pumpStatus member, it is a property
-                    // that *does* access pumpStatus (with null check).
-                    put("battery", JSONObject().apply {
-                        put("percent", batteryLevel)
-                    })
-                    put("reservoir", it.availableUnitsInReservoir)
-                } ?: aapsLogger.info(
-                    LTag.PUMP,
-                    "Cannot include reservoir level in JSON status " +
-                        "since no such level is currently known"
-                )
-                put("extended", JSONObject().apply {
-                    put("Version", version)
-                    lastBolusUIFlow.value?.let {
-                        put("LastBolus", dateUtil.dateAndTimeString(it.timestamp.toEpochMilliseconds()))
-                        put("LastBolusAmount", it.bolusAmount.cctlBolusToIU())
-                    }
-                    val tb = pumpSync.expectedPumpState().temporaryBasal
-                    tb?.let {
-                        put("TempBasalAbsoluteRate", tb.convertedToAbsolute(now, profile))
-                        put("TempBasalStart", dateUtil.dateAndTimeString(tb.timestamp))
-                        put("TempBasalRemaining", tb.plannedRemainingMinutes)
-                    }
-                    if (activeBasalProfile != null)
-                        put("BaseBasalRate", baseBasalRate)
-                    else
-                        aapsLogger.info(
-                            LTag.PUMP,
-                            "Cannot include base basal rate in JSON status " +
-                                "since no basal profile is currently active"
-                        )
-                    put("ActiveProfile", profileName)
-                    when (val alert = lastComboAlert) {
-                        is AlertScreenContent.Warning ->
-                            put("WarningCode", alert.code)
-
-                        is AlertScreenContent.Error   ->
-                            put("ErrorCode", alert.code)
-
-                        else                          -> Unit
-                    }
-                })
-            }
-        } catch (e: JSONException) {
-            aapsLogger.error(LTag.PUMP, "Unhandled JSON exception", e)
-        }
-        aapsLogger.info(LTag.PUMP, "Produced pump JSON status: $pumpJson")
-
-        return pumpJson
     }
 
     override fun manufacturer() = ManufacturerType.Roche
@@ -1445,15 +1337,8 @@ class ComboV2Plugin @Inject constructor(
     override val pumpDescription: PumpDescription
         get() = _pumpDescription
 
-    @OptIn(ExperimentalTime::class)
-    override fun shortStatus(veryShort: Boolean): String {
+    override fun pumpSpecificShortStatus(veryShort: Boolean): String {
         val lines = mutableListOf<String>()
-
-        if (lastConnectionTimestamp != 0L) {
-            val agoMsec: Long = System.currentTimeMillis() - lastConnectionTimestamp
-            val agoMin = (agoMsec / 60.0 / 1000.0).toInt()
-            lines += rh.gs(R.string.combov2_short_status_last_connection, agoMin)
-        }
 
         val alertCodeString = when (val alert = lastComboAlert) {
             is AlertScreenContent.Warning -> "W${alert.code}"
@@ -1463,50 +1348,14 @@ class ComboV2Plugin @Inject constructor(
         if (alertCodeString != null)
             lines += rh.gs(R.string.combov2_short_status_alert, alertCodeString)
 
-        lastBolusUIFlow.value?.let {
-            val localBolusTimestamp = it.timestamp.toLocalDateTime(TimeZone.currentSystemDefault())
-            lines += rh.gs(
-                R.string.combov2_short_status_last_bolus, decimalFormatter.to2Decimal(it.bolusAmount.cctlBolusToIU()),
-                String.format(Locale.getDefault(), "%02d:%02d", localBolusTimestamp.hour, localBolusTimestamp.minute)
-            )
-        }
-
-        val temporaryBasal = pumpSync.expectedPumpState().temporaryBasal
-        temporaryBasal?.let {
-            lines += rh.gs(
-                R.string.combov2_short_status_temp_basal,
-                it.toStringFull(dateUtil, rh)
-            )
-        }
-
-        pumpStatus?.let {
-            lines += rh.gs(
-                R.string.combov2_short_status_reservoir,
-                it.availableUnitsInReservoir
-            )
-            val batteryStateDesc = when (it.batteryState) {
-                BatteryState.NO_BATTERY   -> rh.gs(R.string.combov2_short_status_battery_state_empty)
-                BatteryState.LOW_BATTERY  -> rh.gs(R.string.combov2_short_status_battery_state_low)
-                BatteryState.FULL_BATTERY -> rh.gs(R.string.combov2_short_status_battery_state_full)
-            }
-            lines += rh.gs(
-                R.string.combov2_short_status_battery_state,
-                batteryStateDesc
-            )
-        }
-
-        val shortStatusString = lines.joinToString("\n")
-
-        aapsLogger.debug(LTag.PUMP, "Produced short status: [$shortStatusString]")
-
-        return shortStatusString
+        return lines.joinToString("\n")
     }
 
     override val isFakingTempsByExtendedBoluses = false
 
     @OptIn(ExperimentalTime::class)
     override fun loadTDDs(): PumpEnactResult {
-        val pumpEnactResult = instantiator.providePumpEnactResult()
+        val pumpEnactResult = pumpEnactResultProvider.get()
         val acquiredPump = getAcquiredPump()
 
         runBlocking {
@@ -2398,11 +2247,8 @@ class ComboV2Plugin @Inject constructor(
         )
     }
 
-    private fun reportFinishedBolus(status: String, pumpEnactResult: PumpEnactResult, succeeded: Boolean) {
-        val bolusingEvent = EventOverviewBolusProgress
-        bolusingEvent.status = status
-        bolusingEvent.percent = 100
-        rxBus.send(bolusingEvent)
+    private fun reportFinishedBolus(status: String, id: Long, pumpEnactResult: PumpEnactResult, succeeded: Boolean) {
+        rxBus.send(EventOverviewBolusProgress(rh, percent = 100, id = id))
 
         pumpEnactResult.apply {
             success = succeeded
@@ -2410,11 +2256,11 @@ class ComboV2Plugin @Inject constructor(
         }
     }
 
-    private fun reportFinishedBolus(stringId: Int, pumpEnactResult: PumpEnactResult, succeeded: Boolean) =
-        reportFinishedBolus(rh.gs(stringId), pumpEnactResult, succeeded)
+    private fun reportFinishedBolus(stringId: Int, id: Long, pumpEnactResult: PumpEnactResult, succeeded: Boolean) =
+        reportFinishedBolus(rh.gs(stringId), id, pumpEnactResult, succeeded)
 
     private fun createFailurePumpEnactResult(comment: Int) =
-        instantiator.providePumpEnactResult()
+        pumpEnactResultProvider.get()
             .success(false)
             .enacted(false)
             .comment(comment)

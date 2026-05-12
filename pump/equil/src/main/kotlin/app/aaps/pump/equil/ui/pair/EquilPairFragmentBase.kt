@@ -8,7 +8,9 @@ import android.view.ViewGroup
 import androidx.annotation.IdRes
 import androidx.annotation.LayoutRes
 import androidx.navigation.fragment.findNavController
+import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.utils.HardLimits
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.pump.BlePreCheck
 import app.aaps.core.interfaces.pump.PumpSync
@@ -38,6 +40,8 @@ abstract class EquilPairFragmentBase : DaggerFragment() {
     @Inject lateinit var equilManager: EquilManager
     @Inject lateinit var pumpSync: PumpSync
     @Inject lateinit var equilHistoryRecordDao: EquilHistoryRecordDao
+    @Inject lateinit var constraintsChecker: ConstraintsChecker
+    @Inject lateinit var hardLimits: HardLimits
 
     private var _binding: EquilPairBaseFragmentBinding? = null
     private var _progressIndicationBinding: EquilPairProgressBinding? = null
@@ -55,8 +59,6 @@ abstract class EquilPairFragmentBase : DaggerFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
-        // binding.fragmentTitle.setText(getTitleId())
 
         val nextPage = getNextPageActionId()
 
@@ -86,6 +88,7 @@ abstract class EquilPairFragmentBase : DaggerFragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+        _progressIndicationBinding = null
     }
 
     private fun updateProgressIndication() {
@@ -104,11 +107,6 @@ abstract class EquilPairFragmentBase : DaggerFragment() {
 
     @IdRes
     protected abstract fun getNextPageActionId(): Int?
-
-    // @StringRes
-    // protected fun getTitleId(): Int = viewModel.getTitleId()
-    //
-    // @StringRes protected fun getTextId(): Int = viewModel.getTextId()
 
     protected abstract fun getIndex(): Int
 

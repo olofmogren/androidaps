@@ -13,10 +13,7 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.os.ParcelUuid
 import android.view.View
 import android.view.ViewGroup
@@ -76,7 +73,7 @@ class DiaconnG8BLEScanActivity : TranslatedDaggerAppCompatActivity() {
     override fun onResume() {
         super.onResume()
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
             bluetoothAdapter?.safeEnable()
             startScan()
         } else {
@@ -86,9 +83,14 @@ class DiaconnG8BLEScanActivity : TranslatedDaggerAppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
             stopScan()
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        binding.bleScannerListview.adapter = null
     }
 
     @SuppressLint("MissingPermission")
@@ -116,9 +118,7 @@ class DiaconnG8BLEScanActivity : TranslatedDaggerAppCompatActivity() {
         } // ignore BT not on
 
     private fun addBleDevice(device: BluetoothDevice?) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             ToastUtils.errorToast(context, context.getString(app.aaps.core.ui.R.string.need_connect_permission))
             return
         }
@@ -130,7 +130,7 @@ class DiaconnG8BLEScanActivity : TranslatedDaggerAppCompatActivity() {
             return
         }
         devices.add(item)
-        Handler(Looper.getMainLooper()).post { listAdapter?.notifyDataSetChanged() }
+        runOnUiThread { listAdapter?.notifyDataSetChanged() }
     }
 
     private val mBleScanCallback: ScanCallback = object : ScanCallback() {

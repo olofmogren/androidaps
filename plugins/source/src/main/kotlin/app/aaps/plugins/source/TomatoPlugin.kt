@@ -16,7 +16,6 @@ import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.source.BgSource
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.workflow.LoggingWorker
-import dagger.android.HasAndroidInjector
 import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -46,7 +45,6 @@ class TomatoPlugin @Inject constructor(
         params: WorkerParameters
     ) : LoggingWorker(context, params, Dispatchers.IO) {
 
-        @Inject lateinit var injector: HasAndroidInjector
         @Inject lateinit var tomatoPlugin: TomatoPlugin
         @Inject lateinit var persistenceLayer: PersistenceLayer
 
@@ -59,7 +57,7 @@ class TomatoPlugin @Inject constructor(
             glucoseValues += GV(
                 timestamp = inputData.getLong("com.fanqies.tomatofn.Extras.Time", 0),
                 value = inputData.getDouble("com.fanqies.tomatofn.Extras.BgEstimate", 0.0),
-                raw = 0.0,
+                raw = null,
                 noise = null,
                 trendArrow = TrendArrow.NONE,
                 sourceSensor = SourceSensor.LIBRE_1_TOMATO

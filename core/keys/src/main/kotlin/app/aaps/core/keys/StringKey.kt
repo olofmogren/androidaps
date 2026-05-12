@@ -50,9 +50,11 @@ enum class StringKey(
     NsClientApiSecret("nsclientinternal_api_secret", "", isPassword = true),
     NsClientWifiSsids("ns_wifi_ssids", "", dependency = BooleanKey.NsClientUseWifi),
     NsClientAccessToken("nsclient_token", "", isPassword = true),
-    TidepoolUsername("tidepool_username", ""),
-    TidepoolPassword("tidepool_password", "", isPassword = true),
-    TidepoolTestLogin(key = "tidepool_test_login", ""),
+
+    // Google Drive settings
+    GoogleDriveStorageType("google_drive_storage_type", "local"),
+    GoogleDriveFolderId("google_drive_folder_id", ""),
+    GoogleDriveRefreshToken("google_drive_refresh_token", "", isPassword = true),
 
     PumpCommonBolusStorage("pump_sync_storage_bolus", ""),
     PumpCommonTbrStorage("pump_sync_storage_tbr", ""),

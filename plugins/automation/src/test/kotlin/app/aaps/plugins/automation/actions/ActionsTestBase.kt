@@ -10,7 +10,8 @@ import app.aaps.shared.tests.TestBaseWithProfile
 import org.junit.jupiter.api.BeforeEach
 import org.mockito.ArgumentMatchers.anyInt
 import org.mockito.Mock
-import org.mockito.Mockito.`when`
+import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.whenever
 
 open class
 ActionsTestBase : TestBaseWithProfile() {
@@ -25,7 +26,7 @@ ActionsTestBase : TestBaseWithProfile() {
             if (it is Action) {
                 it.aapsLogger = aapsLogger
                 it.rh = rh
-                it.instantiator = instantiator
+                it.pumpEnactResultProvider = pumpEnactResultProvider
             }
             if (it is ActionStopTempTarget) {
                 it.dateUtil = dateUtil
@@ -52,21 +53,9 @@ ActionsTestBase : TestBaseWithProfile() {
             if (it is ActionNotification) {
                 it.rxBus = rxBus
             }
-            if (it is ActionLoopSuspend) {
-                it.loop = loop
-                it.profileFunction = profileFunction
-            }
-            if (it is ActionLoopResume) {
-                it.loop = loop
-                it.profileFunction = profileFunction
-            }
-            if (it is ActionLoopClosed) {
-                it.loop = loop
-                it.profileFunction = profileFunction
-            }
-            if (it is ActionLoopDisable) {
-                it.loop = loop
-                it.profileFunction = profileFunction
+            if (it is ActionSMBChange) {
+                it.dateUtil = dateUtil
+                it.preferences = preferences
             }
             if (it is ActionCarePortalEvent) {
                 it.persistenceLayer = persistenceLayer
@@ -82,13 +71,13 @@ ActionsTestBase : TestBaseWithProfile() {
 
     @BeforeEach
     fun mock() {
-        `when`(profileFunction.getUnits()).thenReturn(GlucoseUnit.MGDL)
-        `when`(profileFunction.getProfile()).thenReturn(validProfile)
-        `when`(activePlugin.activeProfileSource).thenReturn(profilePlugin)
-        `when`(profilePlugin.profile).thenReturn(getValidProfileStore())
-        `when`(loop.handleRunningModeChange(anyObject(), anyObject(), anyObject(), anyObject(), anyInt(), anyObject())).thenReturn(true)
+        whenever(profileFunction.getUnits()).thenReturn(GlucoseUnit.MGDL)
+        whenever(profileFunction.getProfile()).thenReturn(validProfile)
+        whenever(activePlugin.activeProfileSource).thenReturn(profilePlugin)
+        whenever(profilePlugin.profile).thenReturn(getValidProfileStore())
+        whenever(loop.handleRunningModeChange(anyOrNull(), anyOrNull(), anyOrNull(), anyOrNull(), anyInt(), anyOrNull())).thenReturn(true)
 
-        `when`(rh.gs(app.aaps.core.ui.R.string.ok)).thenReturn("OK")
-        `when`(rh.gs(app.aaps.core.ui.R.string.error)).thenReturn("Error")
+        whenever(rh.gs(app.aaps.core.ui.R.string.ok)).thenReturn("OK")
+        whenever(rh.gs(app.aaps.core.ui.R.string.error)).thenReturn("Error")
     }
 }

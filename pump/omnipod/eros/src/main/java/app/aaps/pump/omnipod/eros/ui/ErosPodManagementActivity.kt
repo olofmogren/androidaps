@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import app.aaps.core.interfaces.configuration.Config
+import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.queue.Callback
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
@@ -34,10 +35,10 @@ import app.aaps.pump.omnipod.eros.manager.AapsOmnipodErosManager
 import app.aaps.pump.omnipod.eros.queue.command.CommandReadPulseLog
 import app.aaps.pump.omnipod.eros.ui.wizard.activation.ErosPodActivationWizardActivity
 import app.aaps.pump.omnipod.eros.ui.wizard.deactivation.ErosPodDeactivationWizardActivity
-import dagger.android.HasAndroidInjector
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
 import javax.inject.Inject
+import javax.inject.Provider
 
 /**
  * Created by andy on 30/08/2019
@@ -47,7 +48,6 @@ class ErosPodManagementActivity : TranslatedDaggerAppCompatActivity() {
     @Inject lateinit var fabricPrivacy: FabricPrivacy
     @Inject lateinit var commandQueue: CommandQueue
     @Inject lateinit var podStateManager: ErosPodStateManager
-    @Inject lateinit var injector: HasAndroidInjector
     @Inject lateinit var rileyLinkServiceData: RileyLinkServiceData
     @Inject lateinit var aapsOmnipodManager: AapsOmnipodErosManager
     @Inject lateinit var context: Context
@@ -58,6 +58,8 @@ class ErosPodManagementActivity : TranslatedDaggerAppCompatActivity() {
     @Inject lateinit var uiInteraction: UiInteraction
     @Inject lateinit var rh: ResourceHelper
     @Inject lateinit var rxBus: RxBus
+    @Inject lateinit var profileFunction: ProfileFunction
+    @Inject lateinit var resetRileyLinkConfigurationTaskProvider: Provider<ResetRileyLinkConfigurationTask>
 
     private var disposables: CompositeDisposable = CompositeDisposable()
     private val handler = Handler(HandlerThread(this::class.simpleName + "Handler").also { it.start() }.looper)
@@ -75,6 +77,16 @@ class ErosPodManagementActivity : TranslatedDaggerAppCompatActivity() {
         supportActionBar?.setDisplayShowHomeEnabled(true)
 
         binding.buttonActivatePod.setOnClickListener {
+            val profile = profileFunction.getProfile()
+            if (profile == null) {
+                OKDialog.show(
+                    this,
+                    rh.gs(app.aaps.pump.omnipod.common.R.string.omnipod_common_warning),
+                    rh.gs(app.aaps.pump.omnipod.common.R.string.omnipod_common_error_failed_to_set_profile_empty_profile)
+                )
+                return@setOnClickListener
+            }
+
             val type: PodActivationWizardActivity.Type = if (podStateManager.isPodInitialized
                 and podStateManager.activationProgress.isAtLeast(ActivationProgress.PRIMING_COMPLETED)
             ) {
@@ -93,8 +105,9 @@ class ErosPodManagementActivity : TranslatedDaggerAppCompatActivity() {
         }
 
         binding.buttonDiscardPod.setOnClickListener {
-            OKDialog.showConfirmation(this,
-                                      rh.gs(app.aaps.pump.omnipod.common.R.string.omnipod_common_pod_management_discard_pod_confirmation), Thread {
+            OKDialog.showConfirmation(
+                this,
+                rh.gs(app.aaps.pump.omnipod.common.R.string.omnipod_common_pod_management_discard_pod_confirmation), Thread {
                     aapsOmnipodManager.discardPodState()
                 })
         }
@@ -109,7 +122,7 @@ class ErosPodManagementActivity : TranslatedDaggerAppCompatActivity() {
 
         binding.buttonResetRileylinkConfig.setOnClickListener {
             // TODO improvement: properly disable button until task is finished
-            handler.post { serviceTaskExecutor.startTask(ResetRileyLinkConfigurationTask(injector)) }
+            handler.post { serviceTaskExecutor.startTask(resetRileyLinkConfigurationTaskProvider.get()) }
         }
 
         binding.buttonPlayTestBeep.setOnClickListener {
@@ -180,6 +193,13 @@ class ErosPodManagementActivity : TranslatedDaggerAppCompatActivity() {
     override fun onPause() {
         super.onPause()
         disposables.clear()
+        handler.removeCallbacksAndMessages(null)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        handler.removeCallbacksAndMessages(null)
+        handler.looper.quitSafely()
     }
 
     private fun refreshButtons() {

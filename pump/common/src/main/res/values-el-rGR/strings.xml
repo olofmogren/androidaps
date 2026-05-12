@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- PumoCommon - Pump Abstract -->
+    <!-- PumpCommon - Pump Abstract -->
     <string name="pump_operation_not_supported_by_pump_driver">Η λειτουργία δεν υποστηρίζεται από την αντλία ή/και οδηγό.</string>
-    <string name="bolus_delivered_so_far">%1$.2f U / %2$.2f U παραδόθηκαν</string>
     <!-- PumpCommon - Pump Status -->
     <string name="pump_status_not_initialized">Δεν αρχικοποιήθηκε</string>
     <string name="pump_status_initialized">Αρχικοποιήθηκε</string>
@@ -11,6 +10,14 @@
     <string name="pump_status_busy">Απασχολημένο</string>
     <string name="pump_status_suspended">Σε αναστολή</string>
     <string name="pump_status_executing_command">Εκτέλεση εντολής</string>
+    <!-- Commands -->
+    <string name="pump_cmd_desc_get_settings">Λήψη ρυθμίσεων</string>
+    <string name="pump_cmd_desc_get_firmware">Λήψη λογισμικού αντλίας</string>
+    <string name="pump_cmd_desc_get_basal_profile">Λήψη προφίλ βασικού ρυθμού</string>
+    <string name="pump_cmd_desc_set_basal_profile">Ρύθμιση βασικού προφίλ</string>
+    <string name="pump_cmd_desc_get_tbr">Λήψη προσωρινού βασικού ρυθμού</string>
+    <string name="pump_cmd_desc_cancel_tbr">Ακύρωση προσωρινού βασικού ρυθμού</string>
+    <string name="pump_cmd_desc_set_tbr">Ρύθμιση προσωρινού βασικού ρυθμού</string>
     <!-- PumpCommon - History Group -->
     <string name="history_group_basal">Βασικοί</string>
     <string name="history_group_configuration">Ρύθμιση παραμέτρων</string>
@@ -37,8 +44,6 @@
     <string name="time_last_week">Τελευταία εβδομάδα</string>
     <string name="time_last_month">Τελευταίος μήνας</string>
     <!-- BLE Config -->
-    <string name="ble_config_button_scan_start">Scan</string>
-    <string name="ble_config_scan_stop">Stop</string>
     <string name="ble_config_scan_selected">Επιλεγμένο</string>
     <string name="ble_config_scan_scanning">Σάρωση</string>
     <string name="ble_config_scan_finished">Η σάρωση ολοκληρώθηκε</string>
@@ -49,10 +54,6 @@
     <plurals name="duration_days">
         <item quantity="one">%1$d ημέρες</item>
         <item quantity="other">%1$d ημέρες</item>
-    </plurals>
-    <plurals name="duration_hours">
-        <item quantity="one">%1$d hour</item>
-        <item quantity="other">%1$d ώρες</item>
     </plurals>
     <plurals name="hoursago">
         <item quantity="one">%1$d ώρα πριν</item>

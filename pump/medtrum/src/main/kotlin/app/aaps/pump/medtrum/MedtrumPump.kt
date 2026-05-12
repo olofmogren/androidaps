@@ -7,10 +7,10 @@ import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.profile.Profile
+import app.aaps.core.interfaces.pump.BolusProgressData
 import app.aaps.core.interfaces.pump.PumpSync
 import app.aaps.core.interfaces.pump.TemporaryBasalStorage
 import app.aaps.core.interfaces.resources.ResourceHelper
-import app.aaps.core.interfaces.rx.events.EventOverviewBolusProgress
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.pump.medtrum.code.ConnectionState
@@ -22,6 +22,7 @@ import app.aaps.pump.medtrum.comm.enums.ModelType
 import app.aaps.pump.medtrum.extension.toByteArray
 import app.aaps.pump.medtrum.extension.toInt
 import app.aaps.pump.medtrum.keys.MedtrumBooleanKey
+import app.aaps.pump.medtrum.keys.MedtrumBooleanNonKey
 import app.aaps.pump.medtrum.keys.MedtrumDoubleNonKey
 import app.aaps.pump.medtrum.keys.MedtrumIntKey
 import app.aaps.pump.medtrum.keys.MedtrumIntNonKey
@@ -66,6 +67,12 @@ class MedtrumPump @Inject constructor(
     var pumpState: MedtrumPumpState
         get() = _pumpState.value
         set(value) {
+            // Maintain patchPrimed flag: set once we reach PRIMING, clear only on STOPPED
+            when {
+                value >= MedtrumPumpState.PRIMING && value < MedtrumPumpState.STOPPED -> patchPrimed = true
+                value == MedtrumPumpState.STOPPED                                     -> patchPrimed = false
+            }
+            
             _pumpState.value = value
             preferences.put(MedtrumIntNonKey.PumpState, value.state.toInt())
         }
@@ -94,6 +101,17 @@ class MedtrumPump @Inject constructor(
         get() = _primeProgress.value
         set(value) {
             _primeProgress.value = value
+        }
+
+    // Tracks that the patch has started priming at least once during the current activation session.
+    // Set when pumpState reaches PRIMING; cleared only by STOPPED or NONE.
+    // Used to detect an unexpected patch reset and block activation in that case.
+    private var _patchPrimed = false
+    var patchPrimed: Boolean
+        get() = _patchPrimed
+        set(value) {
+            _patchPrimed = value
+            preferences.put(MedtrumBooleanNonKey.PatchPrimed, value)
         }
 
     private var _lastBasalType: MutableStateFlow<BasalType> = MutableStateFlow(BasalType.NONE)
@@ -257,7 +275,6 @@ class MedtrumPump @Inject constructor(
             preferences.put(MedtrumDoubleNonKey.BolusAmountToBeDelivered, value)
         }
 
-    var bolusingTreatment: EventOverviewBolusProgress.Treatment? = null // actually delivered treatment
     var bolusProgressLastTimeStamp: Long = 0 // timestamp of last bolus progress message
     var bolusStopped = false // bolus stopped by user
     var bolusDone = true // Bolus completed or stopped on pump, initialize as true as to don't show bolus on init
@@ -325,6 +342,7 @@ class MedtrumPump @Inject constructor(
         _pumpTimeZoneOffset = preferences.get(MedtrumIntNonKey.PumpTimezoneOffset)
         _bolusStartTime = preferences.get(MedtrumLongNonKey.BolusStartTime)
         _bolusAmountToBeDelivered = preferences.get(MedtrumDoubleNonKey.BolusAmountToBeDelivered)
+        _patchPrimed = preferences.get(MedtrumBooleanNonKey.PatchPrimed)
 
         loadActiveAlarms()
 
@@ -405,7 +423,7 @@ class MedtrumPump @Inject constructor(
         aapsLogger.debug(LTag.PUMP, "handleBolusStatusUpdate: bolusType: $bolusType bolusCompleted: $bolusCompleted amountDelivered: $amountDelivered")
         bolusProgressLastTimeStamp = dateUtil.now()
         _bolusAmountDelivered.value = amountDelivered
-        bolusingTreatment?.insulin = amountDelivered
+        BolusProgressData.delivered = amountDelivered
         bolusDone = bolusCompleted
     }
 

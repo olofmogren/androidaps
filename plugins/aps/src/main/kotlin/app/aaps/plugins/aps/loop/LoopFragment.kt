@@ -29,7 +29,6 @@ import app.aaps.plugins.aps.R
 import app.aaps.plugins.aps.databinding.LoopFragmentBinding
 import app.aaps.plugins.aps.extensions.toHtml
 import app.aaps.plugins.aps.loop.events.EventLoopSetLastRunGui
-import dagger.android.HasAndroidInjector
 import dagger.android.support.DaggerFragment
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
@@ -46,7 +45,6 @@ class LoopFragment : DaggerFragment(), MenuProvider {
     @Inject lateinit var loop: Loop
     @Inject lateinit var dateUtil: DateUtil
     @Inject lateinit var decimalFormatter: DecimalFormatter
-    @Inject lateinit var injector: HasAndroidInjector
 
     @Suppress("PrivatePropertyName")
     private val ID_MENU_RUN = 501
@@ -98,7 +96,6 @@ class LoopFragment : DaggerFragment(), MenuProvider {
             else        -> false
         }
 
-    @Synchronized
     override fun onResume() {
         super.onResume()
         disposable += rxBus
@@ -120,16 +117,20 @@ class LoopFragment : DaggerFragment(), MenuProvider {
         preferences.put(BooleanNonKey.ObjectivesLoopUsed, true)
     }
 
-    @Synchronized
     override fun onPause() {
         super.onPause()
         disposable.clear()
-        handler.removeCallbacksAndMessages(null)
     }
 
-    @Synchronized
+    override fun onDestroy() {
+        super.onDestroy()
+        handler.removeCallbacksAndMessages(null)
+        handler.looper.quitSafely()
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
+        _binding?.swipeRefresh?.setOnRefreshListener(null)
         _binding = null
     }
 
@@ -164,7 +165,6 @@ class LoopFragment : DaggerFragment(), MenuProvider {
         }
     }
 
-    @Synchronized
     private fun clearGUI() {
         binding.request.text = ""
         binding.constraints.text = ""

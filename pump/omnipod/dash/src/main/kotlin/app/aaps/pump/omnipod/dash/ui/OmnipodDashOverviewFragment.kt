@@ -35,15 +35,15 @@ import app.aaps.pump.omnipod.common.queue.command.CommandHandleTimeChange
 import app.aaps.pump.omnipod.common.queue.command.CommandResumeDelivery
 import app.aaps.pump.omnipod.common.queue.command.CommandSilenceAlerts
 import app.aaps.pump.omnipod.common.queue.command.CommandSuspendDelivery
-import app.aaps.pump.omnipod.dash.EventOmnipodDashPumpValuesChanged
+import app.aaps.pump.omnipod.common.EventOmnipodDashPumpValuesChanged
 import app.aaps.pump.omnipod.dash.OmnipodDashPumpPlugin
 import app.aaps.pump.omnipod.dash.R
 import app.aaps.pump.omnipod.dash.databinding.OmnipodDashOverviewBinding
 import app.aaps.pump.omnipod.dash.databinding.OmnipodDashOverviewBluetoothStatusBinding
-import app.aaps.pump.omnipod.dash.driver.pod.definition.ActivationProgress
-import app.aaps.pump.omnipod.dash.driver.pod.definition.AlertType
-import app.aaps.pump.omnipod.dash.driver.pod.definition.PodConstants
-import app.aaps.pump.omnipod.dash.driver.pod.state.OmnipodDashPodStateManager
+import app.aaps.pump.omnipod.common.bledriver.pod.definition.ActivationProgress
+import app.aaps.pump.omnipod.common.bledriver.pod.definition.AlertType
+import app.aaps.pump.omnipod.common.bledriver.pod.definition.PodConstants
+import app.aaps.pump.omnipod.common.bledriver.pod.state.OmnipodDashPodStateManager
 import dagger.android.support.DaggerFragment
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
@@ -233,7 +233,7 @@ class OmnipodDashOverviewFragment : DaggerFragment() {
     override fun onPause() {
         super.onPause()
         disposables.clear()
-        handler.removeCallbacks(refreshLoop)
+        handler.removeCallbacksAndMessages(null)
     }
 
     @Synchronized
@@ -243,6 +243,12 @@ class OmnipodDashOverviewFragment : DaggerFragment() {
         _bluetoothStatusBinding = null
         _buttonBinding = null
         _podInfoBinding = null
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        handler.removeCallbacksAndMessages(null)
+        handler.looper.quitSafely()
     }
 
     private fun updateUi() {

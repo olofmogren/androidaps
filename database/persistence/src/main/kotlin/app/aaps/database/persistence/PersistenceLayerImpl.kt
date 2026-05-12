@@ -41,7 +41,7 @@ import app.aaps.database.transactions.CgmSourceTransaction
 import app.aaps.database.transactions.CutCarbsTransaction
 import app.aaps.database.transactions.InsertAndCancelCurrentTemporaryTargetTransaction
 import app.aaps.database.transactions.InsertBolusWithTempIdTransaction
-import app.aaps.database.transactions.InsertEffectiveProfileSwitch
+import app.aaps.database.transactions.InsertEffectiveProfileSwitchTransaction
 import app.aaps.database.transactions.InsertIfNewByTimestampCarbsTransaction
 import app.aaps.database.transactions.InsertIfNewByTimestampTherapyEventTransaction
 import app.aaps.database.transactions.InsertOrUpdateApsResultTransaction
@@ -50,9 +50,10 @@ import app.aaps.database.transactions.InsertOrUpdateBolusTransaction
 import app.aaps.database.transactions.InsertOrUpdateCachedTotalDailyDoseTransaction
 import app.aaps.database.transactions.InsertOrUpdateCarbsTransaction
 import app.aaps.database.transactions.InsertOrUpdateHeartRateTransaction
-import app.aaps.database.transactions.InsertOrUpdateProfileSwitch
-import app.aaps.database.transactions.InsertOrUpdateRunningMode
+import app.aaps.database.transactions.InsertOrUpdateProfileSwitchTransaction
+import app.aaps.database.transactions.InsertOrUpdateRunningModeTransaction
 import app.aaps.database.transactions.InsertOrUpdateStepsCountTransaction
+import app.aaps.database.transactions.InsertOrUpdateTherapyEventTransaction
 import app.aaps.database.transactions.InsertTemporaryBasalWithTempIdTransaction
 import app.aaps.database.transactions.InvalidateBolusCalculatorResultTransaction
 import app.aaps.database.transactions.InvalidateBolusTransaction
@@ -104,7 +105,6 @@ import app.aaps.database.transactions.UpdateNsIdTherapyEventTransaction
 import app.aaps.database.transactions.UserEntryTransaction
 import app.aaps.database.transactions.VersionChangeTransaction
 import dagger.Reusable
-import dagger.android.HasAndroidInjector
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.core.Maybe
 import io.reactivex.rxjava3.core.Single
@@ -113,6 +113,7 @@ import io.reactivex.rxjava3.kotlin.plusAssign
 import java.util.Collections.emptyList
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import javax.inject.Provider
 
 @Reusable
 class PersistenceLayerImpl @Inject constructor(
@@ -120,7 +121,7 @@ class PersistenceLayerImpl @Inject constructor(
     private val repository: AppRepository,
     private val dateUtil: DateUtil,
     private val config: Config,
-    private val injector: HasAndroidInjector
+    private val apsResultProvider: Provider<APSResult>
 ) : PersistenceLayer {
 
     @Suppress("unused")
@@ -745,7 +746,7 @@ class PersistenceLayerImpl @Inject constructor(
 
     override fun getLastEffectiveProfileSwitchId(): Long? = repository.getLastEffectiveProfileSwitchId()
     override fun insertEffectiveProfileSwitch(effectiveProfileSwitch: EPS): Single<PersistenceLayer.TransactionResult<EPS>> =
-        repository.runTransactionForResult(InsertEffectiveProfileSwitch(effectiveProfileSwitch.toDb()))
+        repository.runTransactionForResult(InsertEffectiveProfileSwitchTransaction(effectiveProfileSwitch.toDb()))
             .doOnError { aapsLogger.error(LTag.DATABASE, "Error while inserting EffectiveProfileSwitch", it) }
             .map { result ->
                 val transactionResult = PersistenceLayer.TransactionResult<EPS>()
@@ -856,7 +857,7 @@ class PersistenceLayerImpl @Inject constructor(
 
     override fun getLastRunningModeId(): Long? = repository.getLastRunningModeId()
     override fun insertOrUpdateRunningMode(runningMode: RM, action: Action, source: Sources, note: String?, listValues: List<ValueWithUnit>): Single<PersistenceLayer.TransactionResult<RM>> =
-        repository.runTransactionForResult(InsertOrUpdateRunningMode(runningMode.toDb()))
+        repository.runTransactionForResult(InsertOrUpdateRunningModeTransaction(runningMode.toDb()))
             .doOnError { aapsLogger.error(LTag.DATABASE, "Error while inserting RunningMode", it) }
             .map { result ->
                 val transactionResult = PersistenceLayer.TransactionResult<RM>()
@@ -913,7 +914,7 @@ class PersistenceLayerImpl @Inject constructor(
                         if (doLog) ueValues.add(
                             UE(
                                 timestamp = dateUtil.now(),
-                                action = Action.PROFILE_SWITCH,
+                                action = Action.RUNNING_MODE,
                                 source = Sources.NSClient,
                                 note = "",
                                 values = listOf(ValueWithUnit.Timestamp(it.timestamp))
@@ -927,13 +928,27 @@ class PersistenceLayerImpl @Inject constructor(
                         if (doLog) ueValues.add(
                             UE(
                                 timestamp = dateUtil.now(),
-                                action = Action.PROFILE_SWITCH_REMOVED,
+                                action = Action.RUNNING_MODE_REMOVED,
                                 source = Sources.NSClient,
                                 note = "",
                                 values = listOf(ValueWithUnit.Timestamp(it.timestamp))
                             )
                         )
                     aapsLogger.debug(LTag.DATABASE, "Invalidated RunningMode $it")
+                    transactionResult.invalidated.add(it.fromDb())
+                }
+                result.updatedDuration.forEach {
+                    if (config.AAPSCLIENT.not())
+                        if (doLog) ueValues.add(
+                            UE(
+                                timestamp = dateUtil.now(),
+                                action = Action.RUNNING_MODE_UPDATED,
+                                source = Sources.NSClient,
+                                note = "",
+                                values = listOf(ValueWithUnit.Timestamp(it.timestamp))
+                            )
+                        )
+                    aapsLogger.debug(LTag.DATABASE, "Updated duration RunningMode $it")
                     transactionResult.invalidated.add(it.fromDb())
                 }
                 result.updatedNsId.forEach {
@@ -986,7 +1001,7 @@ class PersistenceLayerImpl @Inject constructor(
 
     override fun getLastProfileSwitchId(): Long? = repository.getLastProfileSwitchId()
     override fun insertOrUpdateProfileSwitch(profileSwitch: PS, action: Action, source: Sources, note: String?, listValues: List<ValueWithUnit>): Single<PersistenceLayer.TransactionResult<PS>> =
-        repository.runTransactionForResult(InsertOrUpdateProfileSwitch(profileSwitch.toDb()))
+        repository.runTransactionForResult(InsertOrUpdateProfileSwitchTransaction(profileSwitch.toDb()))
             .doOnError { aapsLogger.error(LTag.DATABASE, "Error while inserting ProfileSwitch", it) }
             .map { result ->
                 val transactionResult = PersistenceLayer.TransactionResult<PS>()
@@ -1581,6 +1596,22 @@ class PersistenceLayerImpl @Inject constructor(
                 transactionResult
             }
 
+    override fun insertOrUpdateTherapyEvent(therapyEvent: TE): Single<PersistenceLayer.TransactionResult<TE>> =
+        repository.runTransactionForResult(InsertOrUpdateTherapyEventTransaction(therapyEvent.toDb()))
+            .doOnError { aapsLogger.error(LTag.DATABASE, "Error while saving HeartRate", it) }
+            .map { result ->
+                val transactionResult = PersistenceLayer.TransactionResult<TE>()
+                result.inserted.forEach {
+                    aapsLogger.debug(LTag.DATABASE, "Inserted TherapyEvent $it")
+                    transactionResult.inserted.add(it.fromDb())
+                }
+                result.updated.forEach {
+                    aapsLogger.debug(LTag.DATABASE, "Updated TherapyEvent $it")
+                    transactionResult.updated.add(it.fromDb())
+                }
+                transactionResult
+            }
+
     override fun invalidateTherapyEvent(id: Long, action: Action, source: Sources, note: String?, listValues: List<ValueWithUnit>)
         : Single<PersistenceLayer.TransactionResult<TE>> =
         repository.runTransactionForResult(InvalidateTherapyEventTransaction(id))
@@ -1664,6 +1695,10 @@ class PersistenceLayerImpl @Inject constructor(
                 result.updatedDuration.forEach { therapyEvent ->
                     aapsLogger.debug(LTag.DATABASE, "Updated duration TherapyEvent from ${Sources.NSClient.name} $therapyEvent")
                     transactionResult.updatedDuration.add(therapyEvent.fromDb())
+                }
+                result.updatedSite.forEach { therapyEvent ->
+                    aapsLogger.debug(LTag.DATABASE, "Updated Site Rotation TherapyEvent from ${Sources.NSClient.name} $therapyEvent")
+                    transactionResult.updated.add(therapyEvent.fromDb())
                 }
                 log(ueValues)
                 transactionResult
@@ -1902,10 +1937,10 @@ class PersistenceLayerImpl @Inject constructor(
         repository.collectNewEntriesSince(since, until, limit, offset).fromDb()
 
     override fun getApsResultCloseTo(timestamp: Long): APSResult? =
-        repository.getApsResultCloseTo(timestamp).blockingGet()?.fromDb(injector)
+        repository.getApsResultCloseTo(timestamp).blockingGet()?.fromDb(apsResultProvider)
 
     override fun getApsResults(start: Long, end: Long): List<APSResult> =
-        repository.getApsResults(start, end).map { list -> list.asSequence().map { it.fromDb(injector) }.toList() }.blockingGet()
+        repository.getApsResults(start, end).map { list -> list.asSequence().map { it.fromDb(apsResultProvider) }.toList() }.blockingGet()
 
     override fun insertOrUpdateApsResult(apsResult: APSResult): Single<PersistenceLayer.TransactionResult<APSResult>> =
         repository.runTransactionForResult(InsertOrUpdateApsResultTransaction(apsResult.toDb()))
@@ -1914,11 +1949,11 @@ class PersistenceLayerImpl @Inject constructor(
                 val transactionResult = PersistenceLayer.TransactionResult<APSResult>()
                 result.inserted.forEach {
                     aapsLogger.debug(LTag.DATABASE, "Inserted APSResult $it")
-                    transactionResult.inserted.add(it.fromDb(injector))
+                    transactionResult.inserted.add(it.fromDb(apsResultProvider))
                 }
                 result.updated.forEach {
                     aapsLogger.debug(LTag.DATABASE, "Updated APSResult $it")
-                    transactionResult.updated.add(it.fromDb(injector))
+                    transactionResult.updated.add(it.fromDb(apsResultProvider))
                 }
                 transactionResult
             }

@@ -5,13 +5,12 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.AnimationDrawable
-import android.os.Handler
-import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.LinearLayout
 import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
+import androidx.core.view.isVisible
 import androidx.fragment.app.FragmentActivity
 import app.aaps.core.data.plugin.PluginType
 import app.aaps.core.data.ue.Action
@@ -44,6 +43,8 @@ import app.aaps.core.interfaces.sync.NsClient
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.dialogs.OKDialog
+import app.aaps.core.ui.extensions.runOnUiThreadDelayed
+import app.aaps.core.ui.extensions.scanForActivity
 import app.aaps.core.ui.extensions.toVisibility
 import app.aaps.plugins.configuration.R
 import app.aaps.plugins.configuration.configBuilder.events.EventConfigBuilderUpdateGui
@@ -51,6 +52,10 @@ import app.aaps.plugins.configuration.databinding.ConfigbuilderSingleCategoryBin
 import app.aaps.plugins.configuration.databinding.ConfigbuilderSinglePluginBinding
 import app.aaps.plugins.configuration.keys.ConfigurationBooleanComposedKey
 import app.aaps.plugins.configuration.keys.ConfigurationBooleanKey
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.system.exitProcess
@@ -66,7 +71,7 @@ class ConfigBuilderPlugin @Inject constructor(
     private val pumpSync: PumpSync,
     private val protectionCheck: ProtectionCheck,
     private val uiInteraction: UiInteraction,
-private val context: Context
+    private val context: Context
 ) : PluginBaseWithPreferences(
     pluginDescription = PluginDescription()
         .mainType(PluginType.GENERAL)
@@ -80,13 +85,13 @@ private val context: Context
     aapsLogger, rh, preferences
 ), ConfigBuilder {
 
-    private var expandAnimation: AnimationDrawable? = null
+    private val scope = CoroutineScope(Dispatchers.Default + Job())
 
     override fun initialize() {
         loadSettings()
         setAlwaysEnabledPluginsEnabled()
         // Wait for MainActivity start
-        Handler(Looper.getMainLooper()).postDelayed({ rxBus.send(EventAppInitialized()) }, 5000)
+        runOnUiThreadDelayed(5000) { rxBus.send(EventAppInitialized()) }
     }
 
     private fun setAlwaysEnabledPluginsEnabled() {
@@ -200,27 +205,29 @@ private val context: Context
     }
 
     override fun performPluginSwitch(changedPlugin: PluginBase, enabled: Boolean, type: PluginType) {
-        Thread {
-            if (enabled && !changedPlugin.isEnabled()) {
+        if (enabled && !changedPlugin.isEnabled()) {
+            scope.launch {
                 uel.log(
                     Action.PLUGIN_ENABLED, Sources.ConfigBuilder, rh.gs(changedPlugin.pluginDescription.pluginName),
                     ValueWithUnit.SimpleString(rh.gsNotLocalised(changedPlugin.pluginDescription.pluginName))
                 )
-            } else if (!enabled) {
+            }
+        } else if (!enabled) {
+            scope.launch {
                 uel.log(
                     Action.PLUGIN_DISABLED, Sources.ConfigBuilder, rh.gs(changedPlugin.pluginDescription.pluginName),
                     ValueWithUnit.SimpleString(rh.gsNotLocalised(changedPlugin.pluginDescription.pluginName))
                 )
             }
-            changedPlugin.setPluginEnabled(type, enabled)
-            changedPlugin.setFragmentVisible(type, enabled)
-            processOnEnabledCategoryChanged(changedPlugin, type)
-            storeSettings("RemoteConfiguration")
-            rxBus.send(EventRebuildTabs())
-            rxBus.send(EventConfigBuilderChange())
-            rxBus.send(EventConfigBuilderUpdateGui())
-            logPluginStatus()
-        }.start()
+        }
+        changedPlugin.setPluginEnabled(type, enabled)
+        changedPlugin.setFragmentVisible(type, enabled)
+        processOnEnabledCategoryChanged(changedPlugin, type)
+        storeSettings("RemoteConfiguration")
+        rxBus.send(EventRebuildTabs())
+        rxBus.send(EventConfigBuilderChange())
+        rxBus.send(EventConfigBuilderUpdateGui())
+        logPluginStatus()
     }
 
     override fun processOnEnabledCategoryChanged(changedPlugin: PluginBase, type: PluginType) {
@@ -263,7 +270,7 @@ private val context: Context
         @StringRes description: Int,
         pluginType: PluginType,
         plugins: List<PluginBase>,
-        pluginViewHolders: ArrayList<ConfigBuilder.PluginViewHolderInterface>,
+        pluginViewHolders: ArrayList<ConfigBuilder.PluginViewHolderInterface>?,
         activity: FragmentActivity,
         parent: LinearLayout,
         showExpanded: Boolean
@@ -275,14 +282,17 @@ private val context: Context
         val pluginsAdded = ArrayList<PluginViewHolder>()
 
         if (title != null) layout.categoryTitle.text = rh.gs(title)
-        else layout.categoryTitle.visibility = View.GONE
+        else {
+            layout.categoryTitle.visibility = View.GONE
+            layout.header.background = null
+        }
         layout.categoryVisibility.visibility = preferences.simpleMode.not().toVisibility()
         layout.categoryDescription.text = rh.gs(description)
-        expandAnimation = layout.categoryExpandMore.background as AnimationDrawable?
-        expandAnimation?.setEnterFadeDuration(200)
-        expandAnimation?.setExitFadeDuration(200)
-        if (expandAnimation?.isRunning == false)
-            expandAnimation?.start()
+        (layout.categoryExpandMore.background as AnimationDrawable).let { expandAnimation ->
+            expandAnimation.setEnterFadeDuration(200)
+            expandAnimation.setExitFadeDuration(200)
+            if (!expandAnimation.isRunning) expandAnimation.start()
+        }
         layout.categoryExpandLess.setOnClickListener {
             layout.categoryExpandLess.visibility = false.toVisibility()
             layout.categoryExpandMore.visibility = (plugins.size > 1).toVisibility()
@@ -298,9 +308,9 @@ private val context: Context
             }
         }
         for (plugin in plugins) {
-            val pluginViewHolder = PluginViewHolder(layoutInflater, activity, pluginType, plugin)
+            val pluginViewHolder = PluginViewHolder(layoutInflater, pluginType, plugin)
             layout.categoryPlugins.addView(pluginViewHolder.layout.root)
-            pluginViewHolders.add(pluginViewHolder)
+            pluginViewHolders?.add(pluginViewHolder)
             pluginsAdded.add(pluginViewHolder)
         }
         if (showExpanded) layout.categoryExpandMore.callOnClick()
@@ -309,7 +319,6 @@ private val context: Context
 
     inner class PluginViewHolder internal constructor(
         layoutInflater: LayoutInflater,
-        private val activity: FragmentActivity,
         private val pluginType: PluginType,
         val plugin: PluginBase
     ) : ConfigBuilder.PluginViewHolderInterface {
@@ -323,26 +332,32 @@ private val context: Context
             }
 
             layout.pluginEnabledExclusive.setOnClickListener {
-                switchAllowed(plugin, if (layout.pluginEnabledExclusive.visibility == View.VISIBLE) layout.pluginEnabledExclusive.isChecked else layout.pluginEnabledInclusive.isChecked, activity, pluginType)
+                it.context.scanForActivity()?.let { activity ->
+                    switchAllowed(plugin, if (layout.pluginEnabledExclusive.isVisible) layout.pluginEnabledExclusive.isChecked else layout.pluginEnabledInclusive.isChecked, activity, pluginType)
+                }
             }
             layout.pluginEnabledInclusive.setOnClickListener {
-                switchAllowed(plugin, if (layout.pluginEnabledExclusive.visibility == View.VISIBLE) layout.pluginEnabledExclusive.isChecked else layout.pluginEnabledInclusive.isChecked, activity, pluginType)
+                it.context.scanForActivity()?.let { activity ->
+                    switchAllowed(plugin, if (layout.pluginEnabledExclusive.isVisible) layout.pluginEnabledExclusive.isChecked else layout.pluginEnabledInclusive.isChecked, activity, pluginType)
+                }
             }
 
             layout.pluginPreferences.setOnClickListener {
-                protectionCheck.queryProtection(activity, ProtectionCheck.Protection.PREFERENCES, {
-                    val i = Intent(activity, uiInteraction.preferencesActivity)
-                    i.putExtra(UiInteraction.PLUGIN_NAME, plugin.javaClass.simpleName)
-                    activity.startActivity(i)
-                }, null)
+                it.context.scanForActivity()?.let { activity ->
+                    protectionCheck.queryProtection(activity, ProtectionCheck.Protection.PREFERENCES, {
+                        val i = Intent(activity, uiInteraction.preferencesActivity)
+                        i.putExtra(UiInteraction.PLUGIN_NAME, plugin.javaClass.simpleName)
+                        activity.startActivity(i)
+                    }, null)
+                }
             }
         }
 
         init {
-            update()
+            update(layoutInflater.context)
         }
 
-        override fun update() {
+        override fun update(context: Context) {
             layout.pluginEnabledExclusive.visibility = areMultipleSelectionsAllowed(pluginType).not().toVisibility()
             layout.pluginEnabledInclusive.visibility = areMultipleSelectionsAllowed(pluginType).toVisibility()
             layout.pluginEnabledExclusive.isChecked = plugin.isEnabled(pluginType)
@@ -351,10 +366,10 @@ private val context: Context
             layout.pluginEnabledExclusive.isEnabled = !plugin.pluginDescription.alwaysEnabled
             if (plugin.menuIcon != -1) {
                 layout.pluginIcon.visibility = View.VISIBLE
-                layout.pluginIcon.setImageDrawable(ContextCompat.getDrawable(activity, plugin.menuIcon))
+                layout.pluginIcon.setImageDrawable(ContextCompat.getDrawable(context, plugin.menuIcon))
                 if (plugin.menuIcon2 != -1) {
                     layout.pluginIcon2.visibility = View.VISIBLE
-                    layout.pluginIcon2.setImageDrawable(ContextCompat.getDrawable(activity, plugin.menuIcon2))
+                    layout.pluginIcon2.setImageDrawable(ContextCompat.getDrawable(context, plugin.menuIcon2))
                 } else {
                     layout.pluginIcon2.visibility = View.GONE
                 }
